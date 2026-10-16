@@ -4,6 +4,9 @@ Run from project root: python3 -m tests.smoke_gui
 Requires a graphical session; writes only fixtures and project artifacts.
 """
 import json
+import os
+from unittest.mock import patch
+from mio_linux.recovery import Recovery
 import tempfile
 import time
 from pathlib import Path
@@ -115,6 +118,47 @@ def tick():
             window.navigate("overview")
             phase = 5
         elif phase == 5:
+            assert not window.errors, window.errors
+            window.recovery = Recovery(root / 'mio-recovery')
+            os.utime(root / 'cache/example.bin', (1, 1))
+            window.cache_choices[0][0].set_active(True)
+            window.review_cache()
+            phase = 6
+        elif phase == 6 and not window.operation_busy:
+            assert window.last_review_dialog.get_heading() == '移入 Mio 回收站？'
+            window.last_review_dialog.response('execute')
+            phase = 7
+        elif phase == 7 and not window.operation_busy:
+            assert not (root / 'cache/example.bin').exists()
+            records = window.recovery.records()
+            assert len(records) == 1
+            window.navigate('trash')
+            window.review_recovery(records[0], False)
+            window.last_review_dialog.response('execute')
+            phase = 8
+        elif phase == 8 and not window.operation_busy:
+            assert (root / 'cache/example.bin').read_bytes() == b'x' * 4096
+            assert window.recovery.records() == []
+            from mio_linux.packages import Package
+            window.package_items = [Package('apt', 'mio-fixture', '1')]
+            window.render_packages()
+            with patch('mio_linux.packages.review_uninstall', return_value='Remove mio-fixture only'):
+                # Read-only plan is injected; the native dialog and launch wiring are real.
+                window.confirm_operation('卸载 mio-fixture？', 'Remove mio-fixture only', lambda: window.start_transaction(['/usr/bin/true']))
+            record = root / 'transaction.json'
+            record.write_text(json.dumps({'state': 'finished', 'returncode': 0}))
+            with patch('mio_linux.packages.launch', return_value=record) as launch:
+                window.last_review_dialog.response('execute')
+                assert launch.call_count == 1
+            window.poll_transaction()
+            assert '成功完成' in window.maintenance_note.get_label()
+            window.review_maintenance('clean')
+            window.last_review_dialog.response('cancel')
+            assert window.transaction is None
+            result.update(cleanup_confirm=True, recovery_restore=True, package_dispatch=True, maintenance_cancel=True)
+            window.navigate('overview')
+            phase = 9
+        elif phase == 9:
             assert not window.errors, window.errors
             assert window.metrics["memory"][0].get_label() != "—"
             result.update(ok=True, views=list(window.nav), apps=len(window.app_items), cache=window.cache_summary.get_label(), treemap_click=True, cached_navigation=True, breadcrumbs=True, list_filter=True, errors=window.errors)

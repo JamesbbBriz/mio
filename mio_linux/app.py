@@ -15,6 +15,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from .backend import cache_root, cpu_percent, cpu_ticks, disk_stats, human_size, memory_stats, scan_directory
 from .backend import Entry, Scan
 from .disk_view import Treemap
+from .operations_ui import OperationsUI
 
 
 CSS = """
@@ -77,10 +78,11 @@ def clear(widget: Gtk.Box | Gtk.ListBox) -> None:
         widget.remove(child)
 
 
-class Window(Adw.ApplicationWindow):
+class Window(OperationsUI, Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Mio · 澪", default_width=1120, default_height=860)
         self.set_size_request(850, 600)
+        self.set_icon_name("io.github.jamesbbbriz.Mio")
         self.cancel = threading.Event()
         self.jobs = set()
         self.completed = set()
@@ -112,9 +114,11 @@ class Window(Adw.ApplicationWindow):
         self.nav = {}
         for key, title, icon in [
             ("overview", "系统概览", "view-grid-symbolic"),
-            ("cache", "缓存预览", "edit-clear-all-symbolic"),
+            ("cache", "缓存清理", "edit-clear-all-symbolic"),
             ("disk", "磁盘分析", "drive-harddisk-symbolic"),
-            ("apps", "应用列表", "application-x-executable-symbolic"),
+            ("apps", "应用管理", "application-x-executable-symbolic"),
+            ("trash", "Mio 回收站", "user-trash-symbolic"),
+            ("maintenance", "系统维护", "preferences-system-symbolic"),
         ]:
             nav = Gtk.Button(css_classes=["nav"])
             content = box(False, 12)
@@ -127,8 +131,8 @@ class Window(Adw.ApplicationWindow):
         footer = box(css="small")
         footer.set_valign(Gtk.Align.END)
         footer.set_vexpand(True)
-        footer.append(label("●  本地运行 · 只读预览", "muted"))
-        footer.append(label("独立 Linux 开源工具\nv0.2.0 · 免费", "muted small"))
+        footer.append(label("●  本地运行 · 可恢复清理", "muted"))
+        footer.append(label("独立 Linux 开源工具\nv0.3.0 · 免费", "muted small"))
         sidebar.append(footer)
         split.append(sidebar)
         split.append(self.stack)
@@ -140,12 +144,14 @@ class Window(Adw.ApplicationWindow):
         self.build_cache()
         self.build_disk()
         self.build_apps()
+        self.setup_operations()
         self.navigate("overview")
         self.refresh_status()
         self.timer = GLib.timeout_add_seconds(2, self.refresh_status)
 
     def on_close(self, *_):
         self.cancel.set()
+        self.operation_cancel.set()
         self.disk_cancel.set()
         GLib.source_remove(self.timer)
         return False
@@ -244,6 +250,7 @@ class Window(Adw.ApplicationWindow):
         controls = box(False)
         self.cache_button = button("扫描缓存", lambda _: self.start_cache(), "suggested-action")
         self.cache_spinner = Gtk.Spinner()
+        self.cache_controls = controls
         controls.append(self.cache_button)
         controls.append(self.cache_spinner)
         page.append(controls)
@@ -254,7 +261,7 @@ class Window(Adw.ApplicationWindow):
         page.append(label("目录 · 总体积 / 超过 7 天未修改", "section-title"))
         self.cache_results = self.results_list()
         page.append(self.cache_results)
-        page.append(label("当前版本只提供预览。未接入清理、回收站或永久删除。", "small muted", wrap=True))
+        page.append(label("勾选目录后审阅超过 7 天的普通文件；请先关闭相关应用。移入 Mio 回收站后可恢复，永久删除才释放空间。", "small muted", wrap=True))
 
     def run_job(self, key, work, done, control, spinner):
         if key in self.jobs:
@@ -300,6 +307,8 @@ class Window(Adw.ApplicationWindow):
 
     def show_cache(self, scan):
         clear(self.cache_results)
+        self.cache_scan = scan
+        self.cache_choices = []
         self.cache_summary.set_label(f"{human_size(scan.size)}  缓存体积")
         self.cache_note.set_label(f"{scan.root}\n{self.scan_note(scan)}\n按文件名累加逻辑体积；硬链接可能重复计算，不代表可回收空间。")
         for entry in scan.entries[:200]:
@@ -307,6 +316,9 @@ class Window(Adw.ApplicationWindow):
             row.add_prefix(Gtk.Image(icon_name="folder-symbolic" if entry.is_dir else "text-x-generic-symbolic"))
             row.add_suffix(label(human_size(entry.size)))
             row.set_tooltip_text(str(entry.path))
+            check = Gtk.CheckButton()
+            row.add_prefix(check)
+            self.cache_choices.append((check, entry.path))
             self.cache_results.append(row)
         if not scan.entries:
             self.cache_results.append(Adw.ActionRow(title="未发现可显示的缓存文件"))
@@ -520,7 +532,9 @@ class Window(Adw.ApplicationWindow):
         page.append(self.apps_note)
         self.app_results = self.results_list()
         page.append(self.app_results)
-        page.append(label("这是桌面应用列表，不等同于完整软件包清单。卸载与残留清理尚未接入。", "small muted", wrap=True))
+        page.append(label("下方按软件包来源卸载，保留用户配置。桌面入口与软件包名称可能不同。", "small muted", wrap=True))
+        self.package_section = box()
+        page.append(self.package_section)
         self.app_items = []
 
     def load_apps(self):
@@ -548,6 +562,7 @@ class Application(Adw.Application):
         super().__init__(application_id="io.github.jamesbbbriz.Mio", flags=Gio.ApplicationFlags.NON_UNIQUE)
 
     def do_activate(self):
+        Gtk.IconTheme.get_for_display(self.get_display()).add_search_path(str(Path.home() / ".local/share/icons"))
         provider = Gtk.CssProvider()
         provider.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(self.get_display(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
