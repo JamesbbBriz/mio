@@ -92,3 +92,11 @@ mole_guidelines.md
 # Nix build output symlinks
 /result
 /result-*
+
+# Mio Python GUI and local research
+__pycache__/
+*.pyc
+.venv/
+reference/
+artifacts/
+research/

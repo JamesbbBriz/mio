@@ -1,0 +1,568 @@
+"""GTK 4 / libadwaita desktop frontend."""
+
+from __future__ import annotations
+
+import sys
+import threading
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gio, GLib, Gtk
+
+from .backend import cache_root, cpu_percent, cpu_ticks, disk_stats, human_size, memory_stats, scan_directory
+from .backend import Entry, Scan
+from .disk_view import Treemap
+
+
+CSS = """
+window { background: #f7f7fb; color: #303448; }
+.sidebar { background: #f0edf8; border-right: 1px solid #e1ddec; padding: 20px 14px; }
+.brand { font-size: 23px; font-weight: 800; }
+.tag { color: #77748c; font-size: 11px; letter-spacing: 1px; }
+.nav { background: transparent; box-shadow: none; border: none; padding: 15px 14px; border-radius: 12px; }
+.nav.active { background: #e3dcf3; color: #5c4782; }
+.nav:hover { background: #e8e1f3; }
+.page { padding: 24px 30px 32px; }
+.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #7a7592; }
+.page-title { font-size: 29px; font-weight: 800; }
+.muted { color: #777b8e; }
+.card { background: #ffffff; border: 1px solid #e4e9e5; border-radius: 18px; padding: 22px; }
+.hero { background: linear-gradient(110deg, #f6e3ef, #e3edfc); border: 1px solid #e4dced; border-radius: 22px; padding: 28px; }
+.hero-title { font-size: 30px; font-weight: 800; }
+.metric { font-size: 29px; font-weight: 700; }
+.small { font-size: 12px; }
+.section-title { font-size: 17px; font-weight: 700; }
+.pill { background: #edf4ef; color: #42654c; border-radius: 20px; padding: 6px 12px; font-size: 11px; }
+.suggested-action { background: #7565a3; color: white; border-radius: 10px; padding: 10px 20px; }
+.results { background: white; border-radius: 14px; border: 1px solid #e4e9e5; }
+.result-row { padding: 8px 10px; }
+.disk-page { padding: 16px 24px; }
+.disk-map { background: #e8e7f0; padding: 6px; border-radius: 14px; }
+.breadcrumbs button { padding: 4px 8px; font-size: 12px; }
+.disk-detail { background: #eeebf6; padding: 12px 16px; border-radius: 12px; }
+progressbar trough { background: #ebe8f3; min-height: 6px; border-radius: 6px; }
+progressbar progress { background: #a295c5; min-height: 6px; border-radius: 6px; }
+"""
+
+ASSETS = Path(__file__).resolve().parents[1] / "assets"
+
+
+def label(text: str, css: str = "", *, wrap: bool = False) -> Gtk.Label:
+    widget = Gtk.Label(label=text, xalign=0, wrap=wrap)
+    for name in css.split():
+        widget.add_css_class(name)
+    return widget
+
+
+def box(vertical: bool = True, spacing: int = 12, css: str = "") -> Gtk.Box:
+    widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL if vertical else Gtk.Orientation.HORIZONTAL, spacing=spacing)
+    for name in css.split():
+        widget.add_css_class(name)
+    return widget
+
+
+def button(text: str, callback, css: str = "") -> Gtk.Button:
+    widget = Gtk.Button(label=text)
+    widget.connect("clicked", callback)
+    for name in css.split():
+        widget.add_css_class(name)
+    return widget
+
+
+def clear(widget: Gtk.Box | Gtk.ListBox) -> None:
+    while child := widget.get_first_child():
+        widget.remove(child)
+
+
+class Window(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Mio · 澪", default_width=1120, default_height=860)
+        self.set_size_request(850, 600)
+        self.cancel = threading.Event()
+        self.jobs = set()
+        self.completed = set()
+        self.errors = []
+        self.disk_path = Path.home()
+        self.disk_scan = None
+        self.disk_nodes = {}
+        self.disk_cancel = threading.Event()
+        self.disk_generation = 0
+        self.disk_visible_limit = 100
+        self.previous_cpu = cpu_ticks()
+        self.connect("close-request", self.on_close)
+        outer = Gtk.Overlay()
+        split = box(False, 0)
+        sidebar = box(css="sidebar")
+        sidebar.set_size_request(200, -1)
+        brand = box(False, 10)
+        mascot = Gtk.Image.new_from_file(str(ASSETS / "mio-icon.png"))
+        mascot.set_pixel_size(44)
+        brand.append(mascot)
+        brand.append(label("mio / 澪", "brand"))
+        brand_handle = Gtk.WindowHandle(child=brand)
+        sidebar.append(brand_handle)
+        sidebar.append(label("本机空间 · 清晰掌握", "tag"))
+        spacer = box()
+        spacer.set_size_request(-1, 20)
+        sidebar.append(spacer)
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True, vexpand=True)
+        self.nav = {}
+        for key, title, icon in [
+            ("overview", "系统概览", "view-grid-symbolic"),
+            ("cache", "缓存预览", "edit-clear-all-symbolic"),
+            ("disk", "磁盘分析", "drive-harddisk-symbolic"),
+            ("apps", "应用列表", "application-x-executable-symbolic"),
+        ]:
+            nav = Gtk.Button(css_classes=["nav"])
+            content = box(False, 12)
+            content.append(Gtk.Image(icon_name=icon))
+            content.append(label(title))
+            nav.set_child(content)
+            nav.connect("clicked", lambda _, name=key: self.navigate(name))
+            sidebar.append(nav)
+            self.nav[key] = nav
+        footer = box(css="small")
+        footer.set_valign(Gtk.Align.END)
+        footer.set_vexpand(True)
+        footer.append(label("●  本地运行 · 只读预览", "muted"))
+        footer.append(label("独立 Linux 开源工具\nv0.2.0 · 免费", "muted small"))
+        sidebar.append(footer)
+        split.append(sidebar)
+        split.append(self.stack)
+        outer.set_child(split)
+        controls = Gtk.WindowControls(side=Gtk.PackType.END, halign=Gtk.Align.END, valign=Gtk.Align.START, margin_top=6, margin_end=8)
+        outer.add_overlay(controls)
+        self.set_content(outer)
+        self.build_overview()
+        self.build_cache()
+        self.build_disk()
+        self.build_apps()
+        self.navigate("overview")
+        self.refresh_status()
+        self.timer = GLib.timeout_add_seconds(2, self.refresh_status)
+
+    def on_close(self, *_):
+        self.cancel.set()
+        self.disk_cancel.set()
+        GLib.source_remove(self.timer)
+        return False
+
+    def page(self, key, number, title, subtitle):
+        content = box(spacing=18, css="page")
+        drag_handle = Gtk.WindowHandle(child=label(number, "eyebrow"))
+        content.append(drag_handle)
+        content.append(label(title, "page-title"))
+        content.append(label(subtitle, "muted", wrap=True))
+        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.set_child(content)
+        self.stack.add_named(scroller, key)
+        return content
+
+    def navigate(self, key):
+        self.stack.set_visible_child_name(key)
+        for name, nav in self.nav.items():
+            (nav.add_css_class if name == key else nav.remove_css_class)("active")
+        if key == "apps" and key not in self.completed:
+            self.load_apps()
+
+    def build_overview(self):
+        page = self.page("overview", "01 / OVERVIEW", "给电脑，留一点呼吸空间。", "从真实数据开始，了解你的 Linux 桌面。")
+        hero = box(False, 20, "hero")
+        copy = box(spacing=14)
+        copy.set_hexpand(True)
+        copy.append(label("让空间，回到你手里。", "hero-title", wrap=True))
+        copy.append(label("看看缓存占了多少空间，\n找到最大的文件夹，掌握系统状态。", "muted", wrap=True))
+        action = button("开始扫描缓存  →", lambda _: self.start_cache(), "suggested-action")
+        action.set_halign(Gtk.Align.START)
+        copy.append(action)
+        copy.append(label("扫描只读取文件，不会删除或修改内容。", "small muted", wrap=True))
+        hero.append(copy)
+        art = Gtk.Picture.new_for_filename(str(ASSETS / "mio-mascot.png"))
+        art.set_content_fit(Gtk.ContentFit.CONTAIN)
+        art.set_size_request(190, 220)
+        art.set_can_shrink(True)
+        hero.append(art)
+        page.append(hero)
+        cards = box(False, 14)
+        self.metrics = {}
+        for key, name in [("cpu", "CPU 使用率"), ("memory", "内存使用率"), ("disk", "主目录所在磁盘")]:
+            card = box(spacing=10, css="card")
+            card.set_hexpand(True)
+            card.append(label(name, "muted small"))
+            value = label("—", "metric")
+            detail = label("读取中", "muted small", wrap=True)
+            progress = Gtk.ProgressBar()
+            card.append(value)
+            card.append(progress)
+            card.append(detail)
+            cards.append(card)
+            self.metrics[key] = (value, detail, progress)
+        page.append(cards)
+        page.append(label("从这里开始", "section-title"))
+        for title, detail, key in [
+            ("缓存预览", "按目录查看缓存体积与超过 7 天未修改的文件。", "cache"),
+            ("磁盘分析", "按体积排序，逐层找到占空间的目录。", "disk"),
+            ("应用列表", "查看当前桌面环境可见的应用，快速搜索。", "apps"),
+        ]:
+            item = Adw.ActionRow(title=title, subtitle=detail, activatable=True)
+            item.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+            item.connect("activated", lambda _, name=key: self.navigate(name))
+            group = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
+            group.append(item)
+            page.append(group)
+        self.status_note = label("每 2 秒更新 · 数据来自 /proc 与本机文件系统", "small muted", wrap=True)
+        page.append(self.status_note)
+
+    def refresh_status(self):
+        try:
+            current = cpu_ticks()
+            cpu = cpu_percent(self.previous_cpu, current)
+            self.previous_cpu = current
+            used, total = memory_stats()
+            disk = disk_stats()
+            for key, value, detail, fraction in [
+                ("cpu", f"{cpu:.0f}%", "所有逻辑核心 · 实时采样", cpu / 100),
+                ("memory", f"{used / total:.0%}", f"{human_size(used)} / {human_size(total)}", used / total),
+                ("disk", human_size(disk.free), f"可用 / 共 {human_size(disk.total)}", disk.used / disk.total),
+            ]:
+                number, text, bar = self.metrics[key]
+                number.set_label(value)
+                text.set_label(detail)
+                bar.set_fraction(fraction)
+        except (OSError, ValueError, KeyError, ZeroDivisionError) as error:
+            self.status_note.set_label(f"部分系统数据读取失败：{error}")
+        return not self.cancel.is_set()
+
+    def results_list(self):
+        return Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["results"])
+
+    def build_cache(self):
+        page = self.page("cache", "02 / CACHE", "先看清楚，再决定。", "预览用户缓存的逻辑体积。文件较旧并不代表可以安全删除。")
+        controls = box(False)
+        self.cache_button = button("扫描缓存", lambda _: self.start_cache(), "suggested-action")
+        self.cache_spinner = Gtk.Spinner()
+        controls.append(self.cache_button)
+        controls.append(self.cache_spinner)
+        page.append(controls)
+        self.cache_summary = label("尚未扫描", "metric")
+        self.cache_note = label(str(cache_root()), "small muted", wrap=True)
+        page.append(self.cache_summary)
+        page.append(self.cache_note)
+        page.append(label("目录 · 总体积 / 超过 7 天未修改", "section-title"))
+        self.cache_results = self.results_list()
+        page.append(self.cache_results)
+        page.append(label("当前版本只提供预览。未接入清理、回收站或永久删除。", "small muted", wrap=True))
+
+    def run_job(self, key, work, done, control, spinner):
+        if key in self.jobs:
+            return
+        self.jobs.add(key)
+        control.set_sensitive(False)
+        spinner.start()
+
+        def finish(value, error):
+            self.jobs.discard(key)
+            if self.cancel.is_set():
+                return False
+            control.set_sensitive(True)
+            spinner.stop()
+            if error:
+                self.errors.append(str(error))
+                target = self.cache_note if key == "cache" else self.disk_note
+                target.set_label(f"读取失败：{error}")
+            else:
+                done(value)
+                self.completed.add(key)
+            return False
+
+        def worker():
+            try:
+                value = work()
+            except Exception as error:
+                GLib.idle_add(finish, None, error)
+            else:
+                GLib.idle_add(finish, value, None)
+
+        threading.Thread(target=worker, daemon=True, name=f"mole-{key}").start()
+
+    @staticmethod
+    def scan_note(scan):
+        state = "已停止 · 部分结果" if scan.cancelled else ("部分结果：达到时间、深度或条目上限" if scan.partial else "扫描完成")
+        return f"{state} · 检查 {scan.visited:,} 项 · 跳过 {scan.skipped:,} 项（链接、跨磁盘或不可读等）"
+
+    def start_cache(self, root=None):
+        self.navigate("cache")
+        self.cache_note.set_label("正在扫描…")
+        self.run_job("cache", lambda: scan_directory(root or cache_root(), cancel=self.cancel), self.show_cache, self.cache_button, self.cache_spinner)
+
+    def show_cache(self, scan):
+        clear(self.cache_results)
+        self.cache_summary.set_label(f"{human_size(scan.size)}  缓存体积")
+        self.cache_note.set_label(f"{scan.root}\n{self.scan_note(scan)}\n按文件名累加逻辑体积；硬链接可能重复计算，不代表可回收空间。")
+        for entry in scan.entries[:200]:
+            row = Adw.ActionRow(title=GLib.markup_escape_text(entry.path.name), subtitle=f"{entry.files:,} 个文件 · 较旧 {human_size(entry.old_size)}")
+            row.add_prefix(Gtk.Image(icon_name="folder-symbolic" if entry.is_dir else "text-x-generic-symbolic"))
+            row.add_suffix(label(human_size(entry.size)))
+            row.set_tooltip_text(str(entry.path))
+            self.cache_results.append(row)
+        if not scan.entries:
+            self.cache_results.append(Adw.ActionRow(title="未发现可显示的缓存文件"))
+        elif len(scan.entries) > 200:
+            self.cache_results.append(Adw.ActionRow(title=f"仅显示最大的 200 项，共 {len(scan.entries):,} 项"))
+
+    def build_disk(self):
+        page = self.page("disk", "03 / ANALYZE", "大文件夹，一眼就看见。", "方块越大，占用越多。悬停查看详情，点击文件夹进入；面包屑随时返回。")
+        page.add_css_class("disk-page")
+        page.set_spacing(12)
+        controls = box(False, 8)
+        self.parent_button = button("↑ 上一级", lambda _: self.open_disk_path(self.disk_path.parent))
+        self.choose_button = button("选择文件夹", self.choose_folder)
+        self.home_button = button("主目录", lambda _: self.open_disk_path(Path.home()))
+        self.disk_button = button("扫描此目录", lambda _: self.start_disk(self.disk_path), "suggested-action")
+        self.stop_button = button("停止", lambda _: self.disk_cancel.set())
+        self.stop_button.set_sensitive(False)
+        self.disk_spinner = Gtk.Spinner()
+        for child in (self.home_button, self.parent_button, self.choose_button, self.disk_button, self.stop_button, self.disk_spinner):
+            controls.append(child)
+        page.append(controls)
+        self.breadcrumbs = box(False, 0, "breadcrumbs")
+        breadcrumbs_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vscrollbar_policy=Gtk.PolicyType.NEVER)
+        breadcrumbs_scroll.set_child(self.breadcrumbs)
+        page.append(breadcrumbs_scroll)
+        self.disk_summary = label("选择文件夹，开始发现空间。", "section-title")
+        self.disk_note = label(str(self.disk_path), "small muted", wrap=True)
+        page.append(self.disk_summary)
+        page.append(self.disk_note)
+        chart_row = box(False, 12)
+        chart_frame = box(css="disk-map")
+        chart_frame.set_hexpand(True)
+        self.treemap = Treemap(self.select_disk_entry, self.open_disk_path)
+        chart_frame.append(self.treemap)
+        chart_row.append(chart_frame)
+        list_column = box(spacing=8)
+        list_column.set_size_request(275, -1)
+        list_column.append(label("按体积排序", "section-title"))
+        self.disk_search = Gtk.SearchEntry(placeholder_text="筛选当前目录")
+        self.disk_search.connect("search-changed", lambda _: self.render_disk_list())
+        list_column.append(self.disk_search)
+        self.disk_results = self.results_list()
+        list_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=285)
+        list_scroll.set_vexpand(True)
+        list_scroll.set_child(self.disk_results)
+        list_column.append(list_scroll)
+        chart_row.append(list_column)
+        page.append(chart_row)
+        detail = box(spacing=3, css="disk-detail")
+        self.disk_selection = label("悬停方块或选中列表项，查看体积与占比", "section-title", wrap=True)
+        self.disk_selection_path = label("扫描结果只保留在本次会话中。", "small muted", wrap=True)
+        detail.append(self.disk_selection)
+        detail.append(self.disk_selection_path)
+        page.append(detail)
+        page.append(label("只读 · 逻辑体积按文件名计数，硬链接可能重复计算 · 不跟随链接、不跨文件系统\n扫描上限 60 秒 / 500,000 项；未扫描完会明确标注，图中占比仅针对已扫描内容。", "small muted", wrap=True))
+        self.update_breadcrumbs()
+
+    def choose_folder(self, *_):
+        dialog = Gtk.FileDialog(title="选择要分析的文件夹")
+
+        def selected(source, result):
+            try:
+                folder = source.select_folder_finish(result)
+                path = folder.get_path()
+                if path:
+                    self.start_disk(Path(path))
+            except GLib.Error:
+                pass
+
+        dialog.select_folder(self, None, selected)
+
+    def start_disk(self, root):
+        if "disk" in self.jobs:
+            return
+        target = Path(root)
+        self.disk_cancel = threading.Event()
+        self.disk_generation += 1
+        generation = self.disk_generation
+        self.disk_note.set_label(f"{target}\n正在扫描…")
+        self.stop_button.set_sensitive(True)
+        self.parent_button.set_sensitive(False)
+        self.choose_button.set_sensitive(False)
+        self.home_button.set_sensitive(False)
+        self.jobs.add("disk")
+        self.disk_button.set_sensitive(False)
+        self.disk_spinner.start()
+
+        def progress(visited, size):
+            def show():
+                if generation == self.disk_generation and "disk" in self.jobs and not self.cancel.is_set():
+                    self.disk_note.set_label(f"{target}\n正在扫描 {visited:,} 项 · 已统计 {human_size(size)} · 可以停止")
+                return False
+            GLib.idle_add(show)
+
+        def finish(scan, error):
+            self.jobs.discard("disk")
+            if self.cancel.is_set():
+                return False
+            for control in (self.disk_button, self.parent_button, self.choose_button, self.home_button):
+                control.set_sensitive(True)
+            self.stop_button.set_sensitive(False)
+            self.disk_spinner.stop()
+            if error:
+                self.errors.append(str(error))
+                self.disk_note.set_label(f"读取失败：{error}。保留上次结果。")
+            else:
+                self.disk_scan = scan
+                self.disk_nodes = {scan.root: Entry(scan.root, size=scan.size, files=sum(e.files for e in scan.entries), is_dir=True, children=scan.entries, complete=not scan.partial)}
+                pending = list(scan.entries)
+                while pending:
+                    entry = pending.pop()
+                    if entry.is_dir:
+                        self.disk_nodes[entry.path] = entry
+                        pending.extend(entry.children)
+                self.show_disk(scan)
+                self.completed.add("disk")
+            return False
+
+        def worker():
+            try:
+                scan = scan_directory(target, cancel=self.disk_cancel, max_seconds=60, max_nodes=500_000, retain_tree=True, progress=progress)
+            except Exception as error:
+                GLib.idle_add(finish, None, error)
+            else:
+                GLib.idle_add(finish, scan, None)
+
+        threading.Thread(target=worker, daemon=True, name="disk-scan").start()
+
+    def open_disk_path(self, path):
+        if "disk" in self.jobs:
+            return
+        path = Path(path)
+        if path in self.disk_nodes:
+            entry = self.disk_nodes[path]
+            self.show_disk(Scan(path, entries=entry.children, partial=(self.disk_scan.partial or not entry.complete), skipped=self.disk_scan.skipped, visited=self.disk_scan.visited, cancelled=self.disk_scan.cancelled))
+        else:
+            self.start_disk(path)
+
+    def update_breadcrumbs(self):
+        clear(self.breadcrumbs)
+        path = Path(self.disk_path.anchor)
+        self.breadcrumbs.append(button("/", lambda _: self.open_disk_path(Path("/"))))
+        for part in self.disk_path.parts[1:]:
+            path = path / part
+            self.breadcrumbs.append(label("›", "muted"))
+            self.breadcrumbs.append(button(part, lambda _, target=path: self.open_disk_path(target)))
+
+    def select_disk_entry(self, entry):
+        total = self.current_disk_scan.size
+        percent = f"{entry.size / total:.1%}" if total else "0%"
+        incomplete = " · 未完整扫描" if not entry.complete else ""
+        self.disk_selection.set_label(f"{entry.path.name} · {human_size(entry.size)} · {percent}{incomplete}")
+        self.disk_selection_path.set_label(str(entry.path))
+
+    def show_disk(self, scan):
+        self.disk_path = scan.root
+        self.current_disk_scan = scan
+        self.disk_visible_limit = 100
+        self.disk_search.set_text("")
+        self.update_breadcrumbs()
+        self.disk_summary.set_label(f"{human_size(scan.size)}  已扫描文件体积")
+        self.disk_note.set_label(f"{self.scan_note(scan)} · {len(scan.entries):,} 个直接子项")
+        self.treemap.set_entries(scan.entries)
+        self.disk_selection.set_label("悬停方块查看详情 · 点击文件夹进入")
+        self.disk_selection_path.set_label(str(scan.root))
+        self.render_disk_list()
+
+    def render_disk_list(self):
+        if not hasattr(self, "current_disk_scan"):
+            return
+        clear(self.disk_results)
+        scan = self.current_disk_scan
+        query = self.disk_search.get_text().casefold()
+        entries = sorted((e for e in scan.entries if query in e.path.name.casefold()), key=lambda e: (-e.size, e.path.name.casefold()))
+        for entry in entries[:self.disk_visible_limit]:
+            row = Gtk.ListBoxRow(activatable=True)
+            content = box(False, 8, "result-row")
+            content.append(Gtk.Image(icon_name="folder-symbolic" if entry.is_dir else "text-x-generic-symbolic"))
+            name = label(entry.path.name)
+            name.set_ellipsize(3)
+            name.set_hexpand(True)
+            name.set_width_chars(8)
+            content.append(name)
+            content.append(label(human_size(entry.size), "small muted"))
+            row.set_child(content)
+            row.set_tooltip_text(f"{entry.path}\n{'目录' if entry.is_dir else '文件'} · {entry.files:,} 个文件{' · 未完整扫描' if not entry.complete else ''}")
+            # Native row activation provides the keyboard alternative to the map.
+            row.connect("activate", lambda _, item=entry: self.activate_disk_entry(item))
+            self.disk_results.append(row)
+        if not entries:
+            self.disk_results.append(label("没有匹配的项目", "muted"))
+        elif len(entries) > self.disk_visible_limit:
+            more = button(f"再显示 100 项（共 {len(entries):,}）", self.more_disk_entries)
+            self.disk_results.append(more)
+
+    def activate_disk_entry(self, entry):
+        self.treemap.select(entry)
+        if entry.is_dir:
+            self.open_disk_path(entry.path)
+
+    def more_disk_entries(self, *_):
+        self.disk_visible_limit += 100
+        self.render_disk_list()
+
+    def build_apps(self):
+        page = self.page("apps", "04 / APPLICATIONS", "桌面应用，一目了然。", "读取桌面环境中的应用入口，包括系统安装和用户安装的可见应用。")
+        self.app_search = Gtk.SearchEntry(placeholder_text="搜索应用名称或入口 ID")
+        self.app_search.connect("search-changed", lambda _: self.filter_apps())
+        page.append(self.app_search)
+        self.apps_note = label("读取中…", "small muted")
+        page.append(self.apps_note)
+        self.app_results = self.results_list()
+        page.append(self.app_results)
+        page.append(label("这是桌面应用列表，不等同于完整软件包清单。卸载与残留清理尚未接入。", "small muted", wrap=True))
+        self.app_items = []
+
+    def load_apps(self):
+        self.app_items = sorted([info for info in Gio.AppInfo.get_all() if info.should_show()], key=lambda info: info.get_display_name().casefold())
+        self.completed.add("apps")
+        self.filter_apps()
+
+    def filter_apps(self):
+        clear(self.app_results)
+        query = self.app_search.get_text().casefold()
+        matches = [info for info in self.app_items if query in f"{info.get_display_name()} {info.get_id()}".casefold()]
+        self.apps_note.set_label(f"显示 {len(matches)} / {len(self.app_items)} 个桌面应用")
+        for info in matches:
+            row = Adw.ActionRow(title=GLib.markup_escape_text(info.get_display_name()), subtitle=GLib.markup_escape_text(info.get_id() or "桌面应用"))
+            icon = info.get_icon()
+            row.add_prefix(Gtk.Image.new_from_gicon(icon) if icon else Gtk.Image(icon_name="application-x-executable-symbolic"))
+            row.set_tooltip_text(info.get_description() or info.get_display_name())
+            self.app_results.append(row)
+        if not matches:
+            self.app_results.append(Adw.ActionRow(title="没有匹配的桌面应用"))
+
+
+class Application(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="io.github.jamesbbbriz.Mio", flags=Gio.ApplicationFlags.NON_UNIQUE)
+
+    def do_activate(self):
+        provider = Gtk.CssProvider()
+        provider.load_from_string(CSS)
+        Gtk.StyleContext.add_provider_for_display(self.get_display(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
+        self.window = Window(self)
+        self.window.present()
+
+    def get_display(self):
+        from gi.repository import Gdk
+        return Gdk.Display.get_default()
+
+
+def main():
+    return Application().run(sys.argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
