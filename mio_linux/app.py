@@ -10,7 +10,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk, Gdk
 
 from .backend import cache_root, cpu_percent, cpu_ticks, disk_stats, human_size, memory_stats, scan_directory
 from .backend import Entry, Scan
@@ -42,7 +42,10 @@ window { background: #f7f7fb; color: #303448; }
 .result-row { padding: 8px 10px; }
 .disk-page { padding: 16px 24px; }
 .disk-map { background: #e8e7f0; padding: 6px; border-radius: 14px; }
-.breadcrumbs button { padding: 4px 8px; font-size: 12px; }
+.path-bar { background: #ffffff; border: 1px solid #e1ddec; border-radius: 12px; padding: 6px 10px; }
+.breadcrumbs button { background: transparent; box-shadow: none; border: none; padding: 6px 8px; font-size: 13px; }
+.breadcrumbs button:hover { background: #eeebf6; }
+.breadcrumbs .current-path { background: #eeebf6; color: #5c4782; font-weight: 700; }
 .disk-detail { background: #eeebf6; padding: 12px 16px; border-radius: 12px; }
 progressbar trough { background: #ebe8f3; min-height: 6px; border-radius: 6px; }
 progressbar progress { background: #a295c5; min-height: 6px; border-radius: 6px; }
@@ -343,12 +346,27 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         for child in (self.home_button, self.parent_button, self.choose_button, self.disk_button, self.stop_button, self.disk_spinner):
             controls.append(child)
         page.append(controls)
-        self.breadcrumbs = box(False, 0, "breadcrumbs")
-        breadcrumbs_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.AUTOMATIC, vscrollbar_policy=Gtk.PolicyType.NEVER)
-        breadcrumbs_scroll.set_child(self.breadcrumbs)
-        page.append(breadcrumbs_scroll)
+        path_bar = box(False, 6, "path-bar")
+        path_bar.append(Gtk.Image(icon_name="folder-open-symbolic"))
+        self.path_stack = Gtk.Stack(hexpand=True)
+        self.breadcrumbs = box(False, 2, "breadcrumbs")
+        self.path_stack.add_named(self.breadcrumbs, "crumbs")
+        self.path_entry = Gtk.Entry(placeholder_text="输入完整路径，支持 ~/", hexpand=True)
+        self.path_entry.connect("activate", self.submit_disk_path)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self.path_key_pressed)
+        self.path_entry.add_controller(keys)
+        self.path_stack.add_named(self.path_entry, "edit")
+        path_bar.append(self.path_stack)
+        edit = Gtk.Button(icon_name="document-edit-symbolic", tooltip_text="输入路径")
+        edit.connect("clicked", lambda _: self.edit_disk_path())
+        path_bar.append(edit)
+        copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="复制完整路径")
+        copy.connect("clicked", lambda _: self.get_display().get_clipboard().set(str(self.disk_path)))
+        path_bar.append(copy)
+        page.append(path_bar)
         self.disk_summary = label("选择文件夹，开始发现空间。", "section-title")
-        self.disk_note = label(str(self.disk_path), "small muted", wrap=True)
+        self.disk_note = label("点击扫描，或在路径栏输入文件夹位置。", "small muted", wrap=True)
         page.append(self.disk_summary)
         page.append(self.disk_note)
         chart_row = box(False, 12)
@@ -460,14 +478,76 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         else:
             self.start_disk(path)
 
+    def edit_disk_path(self):
+        self.path_entry.set_text(str(self.disk_path))
+        self.path_entry.remove_css_class("error")
+        self.path_stack.set_visible_child_name("edit")
+        self.path_entry.grab_focus()
+        self.path_entry.select_region(0, -1)
+
+    def path_key_pressed(self, controller, keyval, keycode, state):
+        if keyval == Gdk.KEY_Escape:
+            self.path_stack.set_visible_child_name("crumbs")
+            return True
+        return False
+
+    def submit_disk_path(self, entry):
+        text = entry.get_text().strip()
+        try:
+            expanded = Path(text).expanduser()
+        except (RuntimeError, ValueError):
+            expanded = Path()
+        if not text or not expanded.is_absolute():
+            entry.add_css_class("error")
+            entry.set_tooltip_text("请输入绝对路径，例如 /media，或使用 ~/ 开头")
+            return
+        if "disk" in self.jobs:
+            return
+        import os
+        target = Path(os.path.abspath(expanded))
+        entry.remove_css_class("error")
+        entry.set_tooltip_text(None)
+        self.path_stack.set_visible_child_name("crumbs")
+        self.open_disk_path(target)
+
     def update_breadcrumbs(self):
         clear(self.breadcrumbs)
-        path = Path(self.disk_path.anchor)
-        self.breadcrumbs.append(button("/", lambda _: self.open_disk_path(Path("/"))))
-        for part in self.disk_path.parts[1:]:
-            path = path / part
-            self.breadcrumbs.append(label("›", "muted"))
-            self.breadcrumbs.append(button(part, lambda _, target=path: self.open_disk_path(target)))
+        self.path_stack.set_visible_child_name("crumbs")
+        home = Path.home()
+        within_home = self.disk_path == home or home in self.disk_path.parents
+        anchor = home if within_home else Path(self.disk_path.anchor)
+        segments = [("主目录" if within_home else "计算机", anchor)]
+        current = anchor
+        for part in self.disk_path.relative_to(anchor).parts:
+            current = current / part
+            segments.append((part, current))
+        visible = segments if len(segments) <= 4 else [segments[0], None, *segments[-2:]]
+        for index, segment in enumerate(visible):
+            if index:
+                self.breadcrumbs.append(label("›", "muted"))
+            if segment is None:
+                menu = Gtk.MenuButton(label="…", tooltip_text="展开中间目录")
+                popover = Gtk.Popover()
+                choices = box(spacing=2)
+                for name, path in segments[1:-2]:
+                    item = button(name, lambda _, target=path: (popover.popdown(), self.open_disk_path(target)))
+                    item.set_tooltip_text(str(path))
+                    choices.append(item)
+                scroll = Gtk.ScrolledWindow(max_content_height=300, propagate_natural_height=True)
+                scroll.set_child(choices)
+                popover.set_child(scroll)
+                menu.set_popover(popover)
+                self.breadcrumbs.append(menu)
+                continue
+            name, path = segment
+            crumb = button(name, lambda _, target=path: self.open_disk_path(target))
+            crumb.set_tooltip_text(str(path))
+            text = crumb.get_child()
+            text.set_ellipsize(3)
+            text.set_max_width_chars(14)
+            if path == self.disk_path:
+                crumb.add_css_class("current-path")
+            self.breadcrumbs.append(crumb)
 
     def select_disk_entry(self, entry):
         total = self.current_disk_scan.size

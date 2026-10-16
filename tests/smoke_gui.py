@@ -65,6 +65,17 @@ def tick():
         if phase == 0:
             assert window.get_mapped()
             window.stack.set_transition_duration(0)
+            assert window.breadcrumbs.get_first_child().get_label() == '主目录'
+            window.disk_path = Path.home() / '一' / '二' / '三' / '四' / '五'
+            window.update_breadcrumbs()
+            crumb = window.breadcrumbs.get_first_child()
+            found_menu = False
+            while crumb is not None:
+                found_menu |= isinstance(crumb, Gtk.MenuButton)
+                crumb = crumb.get_next_sibling()
+            assert found_menu
+            window.disk_path = Path.home()
+            window.update_breadcrumbs()
             window.start_cache(root / "cache")
             phase = 1
         elif phase == 1 and "cache" in window.completed:
@@ -100,6 +111,15 @@ def tick():
                     break
                 crumb = crumb.get_next_sibling()
             assert window.disk_path == disk_root
+            assert window.disk_generation == scan_generation
+            window.edit_disk_path()
+            assert window.path_stack.get_visible_child_name() == 'edit'
+            window.path_entry.set_text('relative/path')
+            window.path_entry.emit('activate')
+            assert window.path_entry.has_css_class('error')
+            window.path_entry.set_text(str(disk_root))
+            window.path_entry.emit('activate')
+            assert window.path_stack.get_visible_child_name() == 'crumbs'
             assert window.disk_generation == scan_generation
             window.disk_search.set_text("图片")
             window.render_disk_list()
