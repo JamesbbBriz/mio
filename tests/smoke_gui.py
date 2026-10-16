@@ -125,16 +125,19 @@ def tick():
             window.review_cache()
             phase = 6
         elif phase == 6 and not window.operation_busy:
-            assert window.last_review_dialog.get_heading() == '移入 Mio 回收站？'
+            assert window.last_review_dialog.get_heading() == '移入系统回收站？'
             window.last_review_dialog.response('execute')
             phase = 7
         elif phase == 7 and not window.operation_busy:
             assert not (root / 'cache/example.bin').exists()
             records = window.recovery.records()
             assert len(records) == 1
-            window.navigate('trash')
-            window.review_recovery(records[0], False)
-            window.last_review_dialog.response('execute')
+            # Restoration belongs to the file manager; no duplicate trash page.
+            assert window.stack.get_child_by_name('trash') is None
+            with patch('gi.repository.Gio.AppInfo.launch_default_for_uri') as opened:
+                window.navigate('trash')
+                opened.assert_called_once_with('trash:///', None)
+            window.recovery.restore(records[0]['id'])
             phase = 8
         elif phase == 8 and not window.operation_busy:
             assert (root / 'cache/example.bin').read_bytes() == b'x' * 4096
@@ -155,7 +158,7 @@ def tick():
             window.review_maintenance('clean')
             window.last_review_dialog.response('cancel')
             assert window.transaction is None
-            result.update(cleanup_confirm=True, recovery_restore=True, package_dispatch=True, maintenance_cancel=True)
+            result.update(cleanup_confirm=True, system_trash_shortcut=True, package_dispatch=True, maintenance_cancel=True)
             window.navigate('overview')
             phase = 9
         elif phase == 9:

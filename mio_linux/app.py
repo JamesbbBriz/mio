@@ -117,7 +117,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             ("cache", "缓存清理", "edit-clear-all-symbolic"),
             ("disk", "磁盘分析", "drive-harddisk-symbolic"),
             ("apps", "应用管理", "application-x-executable-symbolic"),
-            ("trash", "Mio 回收站", "user-trash-symbolic"),
+            ("trash", "系统回收站 ↗", "user-trash-symbolic"),
             ("maintenance", "系统维护", "preferences-system-symbolic"),
         ]:
             nav = Gtk.Button(css_classes=["nav"])
@@ -132,7 +132,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         footer.set_valign(Gtk.Align.END)
         footer.set_vexpand(True)
         footer.append(label("●  本地运行 · 可恢复清理", "muted"))
-        footer.append(label("独立 Linux 开源工具\nv0.3.0 · 免费", "muted small"))
+        footer.append(label("独立 Linux 开源工具\nv0.3.1 · 免费", "muted small"))
         sidebar.append(footer)
         split.append(sidebar)
         split.append(self.stack)
@@ -168,6 +168,9 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         return content
 
     def navigate(self, key):
+        if key == "trash":
+            self.open_system_trash()
+            return
         self.stack.set_visible_child_name(key)
         for name, nav in self.nav.items():
             (nav.add_css_class if name == key else nav.remove_css_class)("active")
@@ -261,7 +264,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         page.append(label("目录 · 总体积 / 超过 7 天未修改", "section-title"))
         self.cache_results = self.results_list()
         page.append(self.cache_results)
-        page.append(label("勾选目录后审阅超过 7 天的普通文件；请先关闭相关应用。移入 Mio 回收站后可恢复，永久删除才释放空间。", "small muted", wrap=True))
+        page.append(label("勾选目录后审阅超过 7 天的普通文件；请先关闭相关应用。移入系统回收站后可恢复，永久删除才释放空间。", "small muted", wrap=True))
 
     def run_job(self, key, work, done, control, spinner):
         if key in self.jobs:

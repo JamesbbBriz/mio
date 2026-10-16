@@ -6,7 +6,8 @@ import threading
 from gi.repository import Adw, GLib, Gtk
 from . import packages
 from .backend import human_size
-from .recovery import Recovery, plan_cache
+from .recovery import plan_cache
+from .system_trash import SystemTrash
 
 
 class OperationsUI:
@@ -17,21 +18,15 @@ class OperationsUI:
         self.cache_choices = []
         self.package_items = []
         self.transaction = None
-        self.recovery = Recovery()
+        self.recovery = SystemTrash()
         self.cache_review = button('审阅所选缓存文件', lambda _: self.review_cache())
         self.cache_controls.append(self.cache_review)
         self.cache_controls.append(button('停止操作', lambda _: self.operation_cancel.set()))
-        page = self.page('trash', '05 / RECOVERY', '给清理，留一条退路。', 'Mio 回收站只管理由 Mio 移入的文件。恢复不覆盖现有文件；永久删除不可撤销。')
-        page.append(button('刷新回收站', lambda _: self.refresh_recovery()))
-        self.recovery_choices = []
-        page.append(button('选择全部 / 取消全选', lambda _: self.toggle_recovery()))
-        page.append(button('恢复所选', lambda _: self.review_recovery_batch(False)))
-        page.append(button('永久删除所选', lambda _: self.review_recovery_batch(True)))
-        self.recovery_note = label('点击刷新查看', 'small muted', wrap=True)
-        page.append(self.recovery_note)
-        self.recovery_rows = self.results_list()
-        page.append(self.recovery_rows)
-        page = self.page('maintenance', '06 / MAINTENANCE', '系统维护，交给系统。', '操作将在桌面终端中运行。你可以查看完整输出、输入管理员密码并确认实际变更。')
+        self.cache_controls.append(button('打开系统回收站 ↗', lambda _: self.open_system_trash()))
+        legacy = Path.home() / '.local/share/mio/recovery'
+        if legacy.is_dir() and any(legacy.glob('*.file')):
+            self.cache_controls.append(button('迁移旧版回收文件', lambda _: self.review_legacy_migration()))
+        page = self.page('maintenance', '05 / MAINTENANCE', '系统维护，交给系统。', '操作将在桌面终端中运行。你可以查看完整输出、输入管理员密码并确认实际变更。')
         self.maintenance_note = label('尚未运行操作', 'small muted', wrap=True)
         page.append(self.maintenance_note)
         for key, (title, detail, argv) in packages.MAINTENANCE.items():
@@ -105,7 +100,7 @@ class OperationsUI:
             if not plan:
                 return
             listing = '\n'.join(f'{human_size(item.stamp[2])}  {item.path}' for item in plan)
-            self.confirm_operation('移入 Mio 回收站？',
+            self.confirm_operation('移入系统回收站？',
                 '请先关闭相关应用。只移动以下文件，不移除目录。\n同盘移动不会释放空间；可在回收站恢复或永久删除。\n\n' + listing,
                 lambda: self.execute_cache(plan))
         self.operation(lambda: plan_cache(self.cache_scan.root, selected, self.operation_cancel), ready, self.cache_note)
@@ -117,57 +112,30 @@ class OperationsUI:
             self.disk_nodes.clear()
             for check, _ in self.cache_choices:
                 check.set_active(False)
-            self.refresh_recovery()
+
         self.operation(lambda: self.recovery.batch(plan, 'move', self.operation_cancel), done, self.cache_note)
 
-    def refresh_recovery(self):
-        from .app import clear, button
-        def done(records):
-            clear(self.recovery_rows)
-            self.recovery_choices = []
-            self.recovery_note.set_label(f'{len(records)} 个可恢复文件 · {human_size(sum(r["stamp"][2] for r in records))} 逻辑体积')
-            for item in records:
-                row = Adw.ActionRow(title=GLib.markup_escape_text(Path(item['path']).name), subtitle=GLib.markup_escape_text(item['path']))
-                check = Gtk.CheckButton()
-                row.add_prefix(check)
-                self.recovery_choices.append((check, item))
-                row.add_suffix(button('恢复', lambda _, r=item: self.review_recovery(r, False)))
-                row.add_suffix(button('永久删除', lambda _, r=item: self.review_recovery(r, True)))
-                self.recovery_rows.append(row)
-        self.operation(self.recovery.records, done, self.recovery_note)
+    def open_system_trash(self):
+        from gi.repository import Gio
+        try:
+            Gio.AppInfo.launch_default_for_uri('trash:///', None)
+        except GLib.Error as error:
+            self.navigate('cache')
+            self.cache_note.set_label(f'无法打开文件管理器：{error.message}')
 
-    def toggle_recovery(self):
-        active = not all(check.get_active() for check, _ in self.recovery_choices)
-        for check, _ in self.recovery_choices:
-            check.set_active(active)
-
-    def review_recovery_batch(self, erase):
-        items = [item for check, item in self.recovery_choices if check.get_active()]
-        if not items:
-            self.recovery_note.set_label('请先勾选回收文件')
-            return
-        title = '永久删除所选文件？' if erase else '恢复所选文件？'
-        text = ('永久删除不可撤销。' if erase else '逐项恢复，原位置冲突时保留回收文件。') + '\n\n' + '\n'.join(item['path'] for item in items)
-        def execute():
-            def done(result):
-                completed, errors = result
-                report = f'已完成 {len(completed)} / {len(items)} 项。' + '\n'.join(errors[:10])
-                self.confirm_operation('操作结果', report, lambda: None)
-                self.disk_nodes.clear()
-                self.refresh_recovery()
-            self.operation(lambda: self.recovery.batch([item['id'] for item in items], 'erase' if erase else 'restore', self.operation_cancel), done, self.recovery_note)
-        self.confirm_operation(title, text, execute, erase)
-
-    def review_recovery(self, item, erase):
-        title = '永久删除此文件？' if erase else '恢复到原位置？'
-        text = item['path'] + ('\n此操作不可撤销。' if erase else '\n原位置已存在文件时会拒绝恢复，保留回收文件。')
-        def execute():
-            def done(_):
-                self.recovery_note.set_label('已永久删除' if erase else '已恢复')
-                self.disk_nodes.clear()
-                self.refresh_recovery()
-            self.operation(lambda: self.recovery.erase(item['id']) if erase else self.recovery.restore(item['id']), done, self.recovery_note)
-        self.confirm_operation(title, text, execute, erase)
+    def review_legacy_migration(self):
+        def ready(items):
+            if not items:
+                self.cache_note.set_label('没有旧版 Mio 回收文件需要迁移')
+                return
+            def execute():
+                def done(result):
+                    completed, errors = result
+                    self.cache_note.set_label(f'已迁移 {len(completed)} / {len(items)} 项。' + '\n'.join(errors))
+                self.operation(lambda: self.recovery.migrate_legacy(items, self.operation_cancel), done, self.cache_note)
+            self.confirm_operation('迁移到系统回收站？',
+                '以下文件将先恢复到原位置，再进入系统回收站。同名冲突时保留旧副本；如果第二步失败，文件保留在原位置。\n\n' + '\n'.join(item['path'] for item in items), execute)
+        self.operation(self.recovery.legacy_records, ready, self.cache_note)
 
     def load_packages(self):
         def done(result):

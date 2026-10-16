@@ -11,6 +11,6 @@ This fork adds an independent native Linux GUI to Mole CLI's repository. Use Mio
 
 Run `python3 -m unittest discover -s tests -p 'test_*.py' -v` and the GUI smoke test after substantive GUI changes. GUI tests use temporary fixtures. In headless CI use Xvfb, `GSETTINGS_BACKEND=memory`, and `GSK_RENDERER=cairo`.
 
-Keep symlink refusal, filesystem boundaries, bounded scans, cancellation, and honest partial-result reporting. Logical size is not reclaimable space. Read-only scanning is separate from operations in recovery.py, packages.py and operations_ui.py. Follow the reviewed recovery and privilege design in docs/operations-design.md for mutations. Never test destructive operations against real user data.
+Keep symlink refusal, filesystem boundaries, bounded scans, cancellation, and honest partial-result reporting. Logical size is not reclaimable space. Read-only scanning is separate from operations in system_trash.py, packages.py and operations_ui.py (recovery.py handles legacy migration only). Follow the reviewed recovery and privilege design in docs/operations-design.md for mutations. Never test destructive operations against real user data.
 
 Upstream shell and Go code remains a macOS CLI. Its safety documentation, copyright, and GPL-3.0 license still apply to changes in those components. Do not imply that the proprietary Mac GUI is open source or that Mio is an official Mole product. Preserve upstream Git history; do not rewrite published tags.
