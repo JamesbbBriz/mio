@@ -77,7 +77,13 @@ class OperationsUI:
         view.get_buffer().set_text(text)
         scroll = Gtk.ScrolledWindow(min_content_height=220, min_content_width=520, max_content_height=400)
         scroll.set_child(view)
-        dialog.set_extra_child(scroll)
+        from .app import box
+        content = box(spacing=8)
+        portrait = Gtk.Image.new_from_file(str(Path(__file__).resolve().parents[1] / 'assets/mio-icon.png'))
+        portrait.set_pixel_size(64)
+        content.append(portrait)
+        content.append(scroll)
+        dialog.set_extra_child(content)
         dialog.add_response('cancel', '取消')
         dialog.add_response('execute', '确认永久删除' if destructive else '确认继续')
         dialog.set_response_appearance('execute', Adw.ResponseAppearance.DESTRUCTIVE if destructive else Adw.ResponseAppearance.SUGGESTED)
@@ -108,10 +114,13 @@ class OperationsUI:
     def execute_cache(self, plan):
         def done(result):
             completed, errors = result
-            self.cache_note.set_label(f'已移入回收站 {len(completed)} / {len(plan)} 项；尚未释放磁盘空间。' + ('\n' + '\n'.join(errors[:10]) if errors else ''))
+            self.celebration.play(len(completed), len(plan))
+            self.cache_action_note.set_label(f'已移入回收站 {len(completed)} / {len(plan)} 项；尚未释放磁盘空间。' + ('\n' + '\n'.join(errors[:10]) if errors else ''))
             self.disk_nodes.clear()
             for check, _ in self.cache_choices:
                 check.set_active(False)
+            if completed and self.stack.get_visible_child_name() == 'cache':
+                self.start_cache(self.cache_scan.root)
 
         self.operation(lambda: self.recovery.batch(plan, 'move', self.operation_cancel), done, self.cache_note)
 

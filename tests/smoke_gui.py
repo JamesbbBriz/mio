@@ -139,6 +139,7 @@ def tick():
             phase = 5
         elif phase == 5:
             assert not window.errors, window.errors
+            window.navigate('cache')
             window.recovery = Recovery(root / 'mio-recovery')
             os.utime(root / 'cache/example.bin', (1, 1))
             window.cache_choices[0][0].set_active(True)
@@ -150,6 +151,13 @@ def tick():
             phase = 7
         elif phase == 7 and not window.operation_busy:
             assert not (root / 'cache/example.bin').exists()
+            assert window.celebration.play_count == 1
+            if window.celebration.elapsed < 1.0:
+                return True
+            screenshot(window, 'mio-slash-action.png')
+            before = window.celebration.play_count
+            window.celebration.play(0, 1)
+            assert window.celebration.play_count == before
             records = window.recovery.records()
             assert len(records) == 1
             # Restoration belongs to the file manager; no duplicate trash page.
@@ -178,10 +186,18 @@ def tick():
             window.review_maintenance('clean')
             window.last_review_dialog.response('cancel')
             assert window.transaction is None
-            result.update(cleanup_confirm=True, system_trash_shortcut=True, package_dispatch=True, maintenance_cancel=True)
+            window.celebration.enabled = False
+            window.celebration.play(preview=True)
+            assert not window.celebration.animate
+            assert '未操作文件' in window.celebration.caption
+            window.celebration.stop()
+            window.celebration.enabled = True
+            result.update(slash_success_only=True, cleanup_confirm=True, system_trash_shortcut=True, package_dispatch=True, maintenance_cancel=True)
             window.navigate('overview')
             phase = 9
         elif phase == 9:
+            if window.celebration.get_visible():
+                return True
             assert not window.errors, window.errors
             assert window.metrics["memory"][0].get_label() != "—"
             result.update(ok=True, views=list(window.nav), apps=len(window.app_items), cache=window.cache_summary.get_label(), treemap_click=True, cached_navigation=True, breadcrumbs=True, list_filter=True, errors=window.errors)

@@ -1,0 +1,33 @@
+/* Mio's shared character palette: blush, periwinkle and star gold. */
+window { background: linear-gradient(135deg, #fff5fb, #f0f6ff); color: #443857; }
+.sidebar { background: linear-gradient(180deg, #ffeaf6, #e7edff); border-right: 1px solid #e2cfea; }
+.brand { color: #71558e; }
+.tag, .eyebrow { color: #a0649b; }
+.nav { border-radius: 18px; padding: 12px 10px; }
+.nav.active { background: linear-gradient(100deg, #f2cbe9, #d2e2ff); color: #624779; box-shadow: 0 3px 8px alpha(#b891c9, .18); }
+.nav:hover { background: alpha(#fff, .7); }
+button { border-radius: 13px; background: #f5eafa; color: #644f7c; border: 1px solid #e5d4ec; box-shadow: none; }
+button:hover { background: #efdef6; border-color: #cfb0dd; }
+button:checked { background: #ded8f5; }
+button:disabled { opacity: .5; }
+.suggested-action { background: linear-gradient(100deg, #ca78b3, #8888cf); color: #fff; border: 0; }
+.suggested-action:hover { background: linear-gradient(100deg, #d485bd, #9998df); }
+.card, .results, .boxed-list { background: alpha(#fff, .91); border: 1px solid #ead7ef; border-radius: 18px; box-shadow: 0 4px 12px alpha(#b6a4d4, .1); }
+.hero { background: linear-gradient(115deg, #ffe4f4, #e3edff); border: 1px solid #e8cae8; }
+.hero-title, .page-title { color: #5b466e; }
+.muted { color: #88728e; }
+.section-title { color: #715785; }
+.path-bar { background: #fffaff; border: 1px solid #e4cfe9; }
+.breadcrumbs .current-path { background: #f1ddf3; color: #875d95; }
+entry, searchentry { background: #fffaff; color: #584463; border: 1px solid #e2cde9; border-radius: 12px; }
+entry:focus-within, searchentry:focus-within { outline-color: #b78fd2; }
+checkbutton check { border-radius: 6px; border-color: #cdaada; }
+checkbutton check:checked { background: #bd84bd; color: white; }
+progressbar trough { background: #efe1f2; }
+progressbar progress { background: linear-gradient(90deg, #eb9acb, #a1b7ef); }
+.disk-map { background: #ece1f1; border: 1px solid #e1cde7; border-radius: 18px; }
+.disk-detail { background: linear-gradient(100deg, #f8e6f2, #e7edfc); }
+.dialog-content, messagedialog { background: #fff5fc; }
+.character-chip { background: alpha(#fff, .72); border-radius: 14px; padding: 5px; }
+.character-note { color: #9b70a5; font-size: 12px; }
+tooltip { background: #695578; color: #fff5ff; border-radius: 10px; }

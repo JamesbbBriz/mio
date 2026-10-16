@@ -16,7 +16,7 @@ from .treemap import layout
 
 def color_for(entry):
     digest = hashlib.sha256(str(entry.path).encode("utf-8", errors="surrogatepass")).digest()
-    return colorsys.hls_to_rgb(.55 + digest[0] / 255 * .40, .38 + digest[1] / 255 * .07, .35 + digest[2] / 255 * .18)
+    return colorsys.hls_to_rgb(.57 + digest[0] / 255 * .34, .76 + digest[1] / 255 * .08, .45 + digest[2] / 255 * .20)
 
 
 class Treemap(Gtk.DrawingArea):
@@ -127,7 +127,7 @@ class Treemap(Gtk.DrawingArea):
             cr.set_source_rgb(*rgb)
             cr.paint()
             if w >= 55 and h >= 36:
-                cr.set_source_rgb(.98, 1, .98)
+                cr.set_source_rgb(.25, .20, .36)
                 self.text(cr, tile.entry.path.name, x + 12, y + 10, w - 24, 11, True)
                 if h >= 64:
                     self.text(cr, human_size(tile.entry.size), x + 12, y + 33, w - 24, 10)
@@ -135,7 +135,7 @@ class Treemap(Gtk.DrawingArea):
                     self.text(cr, "点击浏览  →", x + 12, y + h - 30, w - 24, 9)
             cr.restore()
             if selected:
-                cr.set_source_rgb(.13, .25, .20)
+                cr.set_source_rgb(.57, .35, .64)
                 cr.set_line_width(3)
                 cr.rectangle(x + 1.5, y + 1.5, max(0, w - 3), max(0, h - 3))
                 cr.stroke()

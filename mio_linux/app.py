@@ -16,6 +16,7 @@ from .backend import cache_root, cpu_percent, cpu_ticks, disk_stats, human_size,
 from .backend import Entry, Scan
 from .disk_view import Treemap
 from .operations_ui import OperationsUI
+from .celebration import SlashCelebration
 
 
 CSS = """
@@ -125,7 +126,10 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         ]:
             nav = Gtk.Button(css_classes=["nav"])
             content = box(False, 12)
-            content.append(Gtk.Image(icon_name=icon))
+            portrait = Gtk.Image.new_from_file(str(ASSETS / ("mio-slash.png" if key == "cache" else "mio-icon.png")))
+            portrait.set_pixel_size(33)
+            portrait.add_css_class("character-chip")
+            content.append(portrait)
             content.append(label(title))
             nav.set_child(content)
             nav.connect("clicked", lambda _, name=key: self.navigate(name))
@@ -134,13 +138,18 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         footer = box(css="small")
         footer.set_valign(Gtk.Align.END)
         footer.set_vexpand(True)
+        motion = Gtk.CheckButton(label="角色动作", active=True)
+        motion.connect("toggled", lambda widget: setattr(self.celebration, "enabled", widget.get_active()))
+        footer.append(motion)
         footer.append(label("●  本地运行 · 可恢复清理", "muted"))
-        footer.append(label("独立 Linux 开源工具\nv0.3.1 · 免费", "muted small"))
+        footer.append(label("独立 Linux 开源工具\nv0.4.0 · 免费", "muted small"))
         sidebar.append(footer)
         split.append(sidebar)
         split.append(self.stack)
         outer.set_child(split)
         controls = Gtk.WindowControls(side=Gtk.PackType.END, halign=Gtk.Align.END, valign=Gtk.Align.START, margin_top=6, margin_end=8)
+        self.celebration = SlashCelebration()
+        outer.add_overlay(self.celebration)
         outer.add_overlay(controls)
         self.set_content(outer)
         self.build_overview()
@@ -153,6 +162,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.timer = GLib.timeout_add_seconds(2, self.refresh_status)
 
     def on_close(self, *_):
+        self.celebration.stop()
         self.cancel.set()
         self.operation_cancel.set()
         self.disk_cancel.set()
@@ -165,6 +175,13 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         content.append(drag_handle)
         content.append(label(title, "page-title"))
         content.append(label(subtitle, "muted", wrap=True))
+        companion = box(False, 8)
+        avatar = Gtk.Image.new_from_file(str(ASSETS / "mio-icon.png"))
+        avatar.set_pixel_size(27)
+        companion.append(avatar)
+        lines = {"overview": "澪 · 今天也一起照顾电脑吧。", "cache": "澪 · 确认清单后，我来帮你收纳。", "disk": "澪 · 方块越大，藏着的文件越多。", "apps": "澪 · 先确认软件来源，再决定去留。", "maintenance": "澪 · 系统操作的每一步，都交给你确认。"}
+        companion.append(label(lines.get(key, "澪 · 我在这里。"), "character-note"))
+        content.append(companion)
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroller.set_child(content)
         self.stack.add_named(scroller, key)
@@ -190,6 +207,9 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         action = button("开始扫描缓存  →", lambda _: self.start_cache(), "suggested-action")
         action.set_halign(Gtk.Align.START)
         copy.append(action)
+        preview = button("✦ 看澪的斩击动作", lambda _: self.celebration.play(preview=True))
+        preview.set_halign(Gtk.Align.START)
+        copy.append(preview)
         copy.append(label("扫描只读取文件，不会删除或修改内容。", "small muted", wrap=True))
         hero.append(copy)
         art = Gtk.Picture.new_for_filename(str(ASSETS / "mio-mascot.png"))
@@ -252,7 +272,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         return Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["results"])
 
     def build_cache(self):
-        page = self.page("cache", "02 / CACHE", "先看清楚，再决定。", "预览用户缓存的逻辑体积。文件较旧并不代表可以安全删除。")
+        page = self.page("cache", "02 / CACHE", "先看清楚，再决定。", "查看缓存占用，审阅后移入系统回收站。文件较旧并不代表可以安全删除。")
         controls = box(False)
         self.cache_button = button("扫描缓存", lambda _: self.start_cache(), "suggested-action")
         self.cache_spinner = Gtk.Spinner()
@@ -260,6 +280,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         controls.append(self.cache_button)
         controls.append(self.cache_spinner)
         page.append(controls)
+        self.cache_action_note = label("澪 · 清理成功后会播放斩击动作，文件仍可从系统回收站恢复。", "character-note", wrap=True)
+        page.append(self.cache_action_note)
         self.cache_summary = label("尚未扫描", "metric")
         self.cache_note = label(str(cache_root()), "small muted", wrap=True)
         page.append(self.cache_summary)
@@ -647,7 +669,7 @@ class Application(Adw.Application):
     def do_activate(self):
         Gtk.IconTheme.get_for_display(self.get_display()).add_search_path(str(Path.home() / ".local/share/icons"))
         provider = Gtk.CssProvider()
-        provider.load_from_string(CSS)
+        provider.load_from_string(CSS + (Path(__file__).with_name("anime.css")).read_text())
         Gtk.StyleContext.add_provider_for_display(self.get_display(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
         self.window = Window(self)
