@@ -31,3 +31,19 @@ progressbar progress { background: linear-gradient(90deg, #eb9acb, #a1b7ef); }
 .character-chip { background: alpha(#fff, .72); border-radius: 14px; padding: 5px; }
 .character-note { color: #9b70a5; font-size: 12px; }
 tooltip { background: #695578; color: #fff5ff; border-radius: 10px; }
+
+/* Each entire navigation hit target is an illustrated character card. */
+.sidebar { padding: 14px 10px; }
+.character-nav { padding: 0; border-radius: 14px; border: 2px solid alpha(#d8c9e5, .7); background: transparent; min-height: 80px; box-shadow: 0 3px 8px alpha(#b59dc8, .14); }
+.character-nav:hover { border-color: #bb8fcd; background: transparent; box-shadow: 0 4px 12px alpha(#9474b0, .28); }
+.character-nav.active { border-color: #a879bf; background: transparent; box-shadow: 0 0 0 2px alpha(#cda9e5, .35), 0 4px 12px alpha(#9474b0, .25); }
+.character-nav:focus-visible { outline: 2px solid #725094; outline-offset: 2px; }
+.character-nav:active { opacity: .88; }
+.nav-copy { background: linear-gradient(90deg, alpha(#fff9ff, .94), alpha(#fff9ff, .78) 68%, alpha(#fff9ff, 0)); }
+.nav-title { font-size: 14px; font-weight: 800; color: #4c385e; text-shadow: 0 1px 2px #fff; }
+.nav-role { font-size: 9px; font-weight: 500; color: #75617e; text-shadow: 0 1px 2px #fff; }
+.nav-marker { background: linear-gradient(180deg, #f3a2d5, #9da8ef); opacity: 0; }
+.character-nav.active .nav-marker { opacity: 1; }
+.nav-apps.active { border-color: #7eaa92; }
+.nav-trash.active { border-color: #cda16e; }
+.nav-maintenance.active { border-color: #7398c9; }

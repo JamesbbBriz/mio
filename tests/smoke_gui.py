@@ -38,6 +38,10 @@ output.mkdir(exist_ok=True)
 def fail(error):
     import traceback
     traceback.print_exc()
+    try:
+        screenshot(app.window, "failure.png")
+    except (TypeError, AttributeError):
+        pass
     result.update(ok=False, phase=phase, error=str(error))
     app.quit()
     return False
@@ -64,6 +68,7 @@ def tick():
             raise TimeoutError("GUI scan callbacks did not complete")
         if phase == 0:
             assert window.get_mapped()
+            assert len({nav.art_path for nav in window.nav.values()}) == 6
             window.stack.set_transition_duration(0)
             assert window.breadcrumbs.get_first_child().get_label() == '主目录'
             window.disk_path = Path.home() / '一' / '二' / '三' / '四' / '五'
@@ -94,6 +99,7 @@ def tick():
         elif phase == 3:
             if time.monotonic() < capture_after:
                 return True
+            assert all(200 <= nav.get_width() <= 300 for nav in window.nav.values()), [nav.get_width() for nav in window.nav.values()]
             assert len(window.treemap.tiles) == 6
             screenshot(window, "disk-treemap.png")
             scan_generation = window.disk_generation

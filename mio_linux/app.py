@@ -17,6 +17,7 @@ from .backend import Entry, Scan
 from .disk_view import Treemap
 from .operations_ui import OperationsUI
 from .celebration import SlashCelebration
+from .character_nav import CharacterNav
 
 
 CSS = """
@@ -101,8 +102,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.connect("close-request", self.on_close)
         outer = Gtk.Overlay()
         split = box(False, 0)
-        sidebar = box(css="sidebar")
-        sidebar.set_size_request(200, -1)
+        sidebar = box(spacing=8, css="sidebar")
+        sidebar.set_size_request(254, -1)
         brand = box(False, 10)
         mascot = Gtk.Image.new_from_file(str(ASSETS / "mio-icon.png"))
         mascot.set_pixel_size(44)
@@ -112,7 +113,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         sidebar.append(brand_handle)
         sidebar.append(label("本机空间 · 清晰掌握", "tag"))
         spacer = box()
-        spacer.set_size_request(-1, 20)
+        spacer.set_size_request(-1, 4)
         sidebar.append(spacer)
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True, vexpand=True)
         self.nav = {}
@@ -124,14 +125,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             ("trash", "系统回收站 ↗", "user-trash-symbolic"),
             ("maintenance", "系统维护", "preferences-system-symbolic"),
         ]:
-            nav = Gtk.Button(css_classes=["nav"])
-            content = box(False, 12)
-            portrait = Gtk.Image.new_from_file(str(ASSETS / ("mio-slash.png" if key == "cache" else "mio-icon.png")))
-            portrait.set_pixel_size(33)
-            portrait.add_css_class("character-chip")
-            content.append(portrait)
-            content.append(label(title))
-            nav.set_child(content)
+            nav = CharacterNav(key, title)
             nav.connect("clicked", lambda _, name=key: self.navigate(name))
             sidebar.append(nav)
             self.nav[key] = nav
@@ -144,7 +138,9 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         footer.append(label("●  本地运行 · 可恢复清理", "muted"))
         footer.append(label("独立 Linux 开源工具\nv0.4.0 · 免费", "muted small"))
         sidebar.append(footer)
-        split.append(sidebar)
+        sidebar_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC)
+        sidebar_scroll.set_child(sidebar)
+        split.append(sidebar_scroll)
         split.append(self.stack)
         outer.set_child(split)
         controls = Gtk.WindowControls(side=Gtk.PackType.END, halign=Gtk.Align.END, valign=Gtk.Align.START, margin_top=6, margin_end=8)
