@@ -2,9 +2,9 @@ name: Mio Linux checks
 
 on:
   push:
-    paths: ['mio_linux/**', 'tests/test_*.py', 'tests/smoke_gui.py', 'tests/trash_*.py', 'tests/__init__.py', 'assets/**', 'run.sh', '.github/workflows/mio.yml']
+    paths: ['mio_linux/**', 'tests/test_*.py', 'tests/smoke*.py', 'tests/trash_*.py', 'tests/__init__.py', 'assets/**', 'run.sh', '.github/workflows/mio.yml']
   pull_request:
-    paths: ['mio_linux/**', 'tests/test_*.py', 'tests/smoke_gui.py', 'tests/trash_*.py', 'tests/__init__.py', 'assets/**', 'run.sh', '.github/workflows/mio.yml']
+    paths: ['mio_linux/**', 'tests/test_*.py', 'tests/smoke*.py', 'tests/trash_*.py', 'tests/__init__.py', 'assets/**', 'run.sh', '.github/workflows/mio.yml']
   workflow_dispatch:
 
 permissions:
@@ -30,7 +30,9 @@ jobs:
         env:
           GSETTINGS_BACKEND: memory
           GSK_RENDERER: cairo
-        run: xvfb-run -a python3 -m tests.smoke_gui
+        run: |
+          xvfb-run -a python3 -m tests.smoke_gui
+          xvfb-run -a python3 -m tests.smoke_disk_delete
       - name: Upload GUI report and screenshots
         if: always()
         uses: actions/upload-artifact@v4

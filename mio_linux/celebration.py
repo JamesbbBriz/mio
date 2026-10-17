@@ -17,10 +17,11 @@ class SlashCelebration(Gtk.DrawingArea):
         self.caption = ''
         self.enabled = True
 
-    def play(self, completed=0, total=0, preview=False):
+    def play(self, completed=0, total=0, preview=False, target=None):
         if not preview and completed <= 0:
             return
         self.stop()
+        self.target = target
         self.play_count += 1
         self.caption = '动作预览 · 未操作文件' if preview else f'已收纳 {completed} 项 · 可在系统回收站恢复'
         if not preview and completed < total:
@@ -63,7 +64,7 @@ class SlashCelebration(Gtk.DrawingArea):
     def draw(self, area, cr, width, height):
         t = self.elapsed
         fade = min(1, max(0, (2.8 - t) / .45)) if self.animate else 1
-        cx, cy = width * .58, min(height * .56, height - 180)
+        cx, cy = self.target if self.target else (width * .58, min(height * .56, height - 180))
         if self.animate:
             # Abstract cache fragments: a visual receipt, not a second file operation.
             burst = max(0, min(1, (t - .75) / .9))

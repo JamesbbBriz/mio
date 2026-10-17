@@ -124,6 +124,74 @@ class OperationsUI:
 
         self.operation(lambda: self.recovery.batch(plan, 'move', self.operation_cancel), done, self.cache_note)
 
+    def review_disk_delete(self):
+        from .disk_operations import plan_disk, trash_disk
+        if self.operation_busy or self.disk_mutating or "disk" in self.jobs:
+            return
+        entry = self.disk_selected
+        scan = getattr(self, 'current_disk_scan', None)
+        if entry is None or scan is None or scan.partial or not entry.complete or not any(entry is e for e in scan.entries):
+            self.disk_action_note.set_label('请从完整扫描结果中选中一个文件或文件夹')
+            return
+        root, generation = scan.root, self.disk_generation
+        self.disk_mutating = True
+        self.disk_delete.set_sensitive(False)
+
+        def attempt(work):
+            try:
+                return work(), None
+            except Exception as error:
+                return None, str(error)
+
+        def unlock():
+            self.disk_mutating = False
+            self.disk_delete.set_sensitive(self.disk_selected is not None)
+
+        def ready(result):
+            plan, error = result
+            if error:
+                unlock()
+                self.disk_action_note.set_label('未移动：' + error)
+                return
+            self.disk_action_note.set_label('检查完成，等待确认')
+            self.confirm_operation('将所选项目移入系统回收站？',
+                f'{plan.path}\n\n类型：{"文件夹（含全部内容）" if entry.is_dir else "文件"}\n'
+                f'逻辑体积：{human_size(plan.size)} · 检查 {len(plan.entries)} 项\n\n'
+                '请先关闭相关应用。可从系统文件管理器的回收站恢复。移入回收站不等于释放磁盘空间。',
+                lambda: execute(plan))
+            self.last_review_dialog.connect('response', lambda _, response: unlock() if response != 'execute' else None)
+
+        def execute(plan):
+            if generation != self.disk_generation or root != self.disk_path:
+                unlock()
+                self.disk_action_note.set_label('目录已改变，请重新选择')
+                return
+            def moved(result):
+                _, error = result
+                if error:
+                    unlock()
+                    self.disk_action_note.set_label('未移动：' + error)
+                    return
+                self.disk_nodes.clear()
+                self.disk_action_note.set_label(f'已移入系统回收站：{plan.path.name} · 可恢复，尚未释放空间')
+                target = None
+                tile = next((t for t in self.treemap.tiles if t.entry.path == plan.path), None)
+                if tile:
+                    ok, bounds = self.treemap.compute_bounds(self.celebration)
+                    if ok:
+                        target = (bounds.get_x() + tile.x + tile.width / 2,
+                                  bounds.get_y() + tile.y + tile.height / 2)
+                self.celebration.play(1, 1, target=target)
+                def refresh():
+                    if self.cancel.is_set():
+                        return False
+                    unlock()
+                    self.start_disk(root)
+                    return False
+                GLib.timeout_add(950 if self.celebration.animate else 1, refresh)
+            self.operation(lambda: attempt(lambda: trash_disk(plan, self.operation_cancel)), moved, self.disk_action_note)
+        self.operation(lambda: attempt(lambda: plan_disk(entry.path, self.operation_cancel)), ready, self.disk_action_note)
+
     def open_system_trash(self):
         from gi.repository import Gio
         try:

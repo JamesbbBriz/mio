@@ -183,6 +183,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         return content
 
     def navigate(self, key):
+        if getattr(self, "disk_mutating", False):
+            return
         self.stack.set_visible_child_name(key)
         for name, nav in self.nav.items():
             (nav.add_css_class if name == key else nav.remove_css_class)("active")
@@ -346,7 +348,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             self.cache_results.append(Adw.ActionRow(title=f"仅显示最大的 200 项，共 {len(scan.entries):,} 项"))
 
     def build_disk(self):
-        page = self.page("disk", "03 / ANALYZE", "大文件夹，一眼就看见。", "方块越大，占用越多。悬停查看详情，点击文件夹进入；面包屑随时返回。")
+        page = self.page("disk", "03 / ANALYZE", "大文件夹，一眼就看见。", "方块越大，占用越多。单击选中，双击文件夹进入；面包屑随时返回。")
         page.add_css_class("disk-page")
         page.set_spacing(12)
         controls = box(False, 8)
@@ -383,6 +385,15 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.disk_note = label("点击扫描，或在路径栏输入文件夹位置。", "small muted", wrap=True)
         page.append(self.disk_summary)
         page.append(self.disk_note)
+        actions = box(False, 10)
+        self.disk_delete = button("移入系统回收站…", lambda _: self.review_disk_delete())
+        self.disk_delete.set_sensitive(False)
+        actions.append(self.disk_delete)
+        self.disk_action_note = label("选中文件或文件夹，再确认移入系统回收站。", "small muted", wrap=True)
+        actions.append(self.disk_action_note)
+        self.disk_mutating = False
+        self.disk_selected = None
+        page.append(actions)
         chart_row = box(False, 12)
         chart_frame = box(css="disk-map")
         chart_frame.set_hexpand(True)
@@ -408,7 +419,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         detail.append(self.disk_selection)
         detail.append(self.disk_selection_path)
         page.append(detail)
-        page.append(label("只读 · 逻辑体积按文件名计数，硬链接可能重复计算 · 不跟随链接、不跨文件系统\n扫描上限 60 秒 / 500,000 项；未扫描完会明确标注，图中占比仅针对已扫描内容。", "small muted", wrap=True))
+        page.append(label("扫描只读，删除需单独确认 · 逻辑体积按文件名计数，硬链接可能重复计算 · 不跟随链接、不跨文件系统\n扫描上限 60 秒 / 500,000 项；未扫描完会明确标注，图中占比仅针对已扫描内容。", "small muted", wrap=True))
         self.update_breadcrumbs()
 
     def choose_folder(self, *_):
@@ -426,8 +437,10 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         dialog.select_folder(self, None, selected)
 
     def start_disk(self, root):
-        if "disk" in self.jobs:
+        if "disk" in self.jobs or self.disk_mutating:
             return
+        self.disk_selected = None
+        self.disk_delete.set_sensitive(False)
         target = Path(root)
         self.disk_cancel = threading.Event()
         self.disk_generation += 1
@@ -483,7 +496,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         threading.Thread(target=worker, daemon=True, name="disk-scan").start()
 
     def open_disk_path(self, path):
-        if "disk" in self.jobs:
+        if "disk" in self.jobs or self.disk_mutating:
             return
         path = Path(path)
         if path in self.disk_nodes:
@@ -515,7 +528,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             entry.add_css_class("error")
             entry.set_tooltip_text("请输入绝对路径，例如 /media，或使用 ~/ 开头")
             return
-        if "disk" in self.jobs:
+        if "disk" in self.jobs or self.disk_mutating:
             return
         import os
         target = Path(os.path.abspath(expanded))
@@ -564,6 +577,10 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             self.breadcrumbs.append(crumb)
 
     def select_disk_entry(self, entry):
+        if self.disk_mutating or "disk" in self.jobs:
+            return
+        self.disk_selected = entry if any(entry is e for e in self.current_disk_scan.entries) else None
+        self.disk_delete.set_sensitive(self.disk_selected is not None and entry.complete and not self.current_disk_scan.partial)
         total = self.current_disk_scan.size
         percent = f"{entry.size / total:.1%}" if total else "0%"
         incomplete = " · 未完整扫描" if not entry.complete else ""
@@ -571,6 +588,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.disk_selection_path.set_label(str(entry.path))
 
     def show_disk(self, scan):
+        self.disk_selected = None
+        self.disk_delete.set_sensitive(False)
         self.disk_path = scan.root
         self.current_disk_scan = scan
         self.disk_visible_limit = 100
@@ -579,7 +598,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.disk_summary.set_label(f"{human_size(scan.size)}  已扫描文件体积")
         self.disk_note.set_label(f"{self.scan_note(scan)} · {len(scan.entries):,} 个直接子项")
         self.treemap.set_entries(scan.entries)
-        self.disk_selection.set_label("悬停方块查看详情 · 点击文件夹进入")
+        self.disk_selection.set_label("单击方块选中 · 双击文件夹进入")
         self.disk_selection_path.set_label(str(scan.root))
         self.render_disk_list()
 
@@ -602,6 +621,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             content.append(label(human_size(entry.size), "small muted"))
             row.set_child(content)
             row.set_tooltip_text(f"{entry.path}\n{'目录' if entry.is_dir else '文件'} · {entry.files:,} 个文件{' · 未完整扫描' if not entry.complete else ''}")
+            select = button("选择", lambda _, item=entry: self.treemap.select(item))
+            content.append(select)
             # Native row activation provides the keyboard alternative to the map.
             row.connect("activate", lambda _, item=entry: self.activate_disk_entry(item))
             self.disk_results.append(row)

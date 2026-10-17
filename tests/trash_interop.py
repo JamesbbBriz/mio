@@ -98,3 +98,18 @@ with patch.object(trash, 'move', side_effect=ValueError('fixture trash failure')
 assert not completed and errors
 assert source.read_text() == 'original' and not legacy.records()
 print('System trash interoperability: move, external visibility, conflict, directory restore/delete, symlink, external restore, legacy migration passed')
+# Disk analyzer's production path supports files AND complete directories.
+from mio_linux.disk_operations import plan_disk, trash_disk
+for target in [source, root / 'disk-folder']:
+    if target != source:
+        target.mkdir()
+        (target / 'nested').mkdir()
+        (target / 'nested/file').write_text('disk contents')
+    trash_disk(plan_disk(target))
+    assert not target.exists()
+    record = records_for(target)[0]
+    trash.restore(record['id'])
+    assert target.exists()
+    if target.is_dir():
+        assert (target / 'nested/file').read_text() == 'disk contents'
+print('Disk analyzer file and directory trash/restore passed')

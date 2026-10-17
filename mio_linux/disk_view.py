@@ -25,6 +25,7 @@ class Treemap(Gtk.DrawingArea):
         self.entries = []
         self.tiles = []
         self.selected = None
+        self.hovered = None
         self.on_select = on_select
         self.on_activate = on_activate
         self.empty_text = "开始扫描，让空间分布一目了然"
@@ -59,14 +60,15 @@ class Treemap(Gtk.DrawingArea):
     def motion(self, _, x, y):
         tile = self.tile_at(x, y)
         if tile is not None and (self.selected is None or tile.entry.path != self.selected.path):
-            self.select(tile.entry)
+            self.hovered = tile.entry
+            self.queue_draw()
 
     def clicked(self, _, presses, x, y):
         self.grab_focus()
         tile = self.tile_at(x, y)
         if tile is not None:
             self.select(tile.entry)
-            if tile.entry.is_dir:
+            if presses >= 2 and tile.entry.is_dir:
                 self.on_activate(tile.entry.path)
 
     def key_pressed(self, _, key, code, state):
@@ -132,7 +134,7 @@ class Treemap(Gtk.DrawingArea):
                 if h >= 64:
                     self.text(cr, human_size(tile.entry.size), x + 12, y + 33, w - 24, 10)
                 if h >= 92 and tile.entry.is_dir:
-                    self.text(cr, "点击浏览  →", x + 12, y + h - 30, w - 24, 9)
+                    self.text(cr, "双击浏览  →", x + 12, y + h - 30, w - 24, 9)
             cr.restore()
             if selected:
                 cr.set_source_rgb(.57, .35, .64)

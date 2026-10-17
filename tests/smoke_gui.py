@@ -106,6 +106,10 @@ def tick():
             tile = next(tile for tile in window.treemap.tiles if tile.entry.path.name == "视频")
             # Drive the actual native map gesture handler, including hit testing.
             window.treemap.clicked(None, 1, tile.x + tile.width / 2, tile.y + tile.height / 2)
+            assert window.disk_selected is tile.entry
+            assert window.disk_delete.get_sensitive()
+            assert window.disk_path == disk_root
+            window.treemap.clicked(None, 2, tile.x + tile.width / 2, tile.y + tile.height / 2)
             assert window.disk_path == disk_root / "视频"
             assert "disk" not in window.jobs
             assert window.disk_generation == scan_generation
