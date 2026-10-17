@@ -122,7 +122,6 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             ("cache", "缓存清理", "edit-clear-all-symbolic"),
             ("disk", "磁盘分析", "drive-harddisk-symbolic"),
             ("apps", "应用管理", "application-x-executable-symbolic"),
-            ("trash", "系统回收站 ↗", "user-trash-symbolic"),
             ("maintenance", "系统维护", "preferences-system-symbolic"),
         ]:
             nav = CharacterNav(key, title)
@@ -184,9 +183,6 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         return content
 
     def navigate(self, key):
-        if key == "trash":
-            self.open_system_trash()
-            return
         self.stack.set_visible_child_name(key)
         for name, nav in self.nav.items():
             (nav.add_css_class if name == key else nav.remove_css_class)("active")

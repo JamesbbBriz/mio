@@ -68,7 +68,7 @@ def tick():
             raise TimeoutError("GUI scan callbacks did not complete")
         if phase == 0:
             assert window.get_mapped()
-            assert len({nav.art_path for nav in window.nav.values()}) == 6
+            assert len({nav.art_path for nav in window.nav.values()}) == 5
             window.stack.set_transition_duration(0)
             assert window.breadcrumbs.get_first_child().get_label() == '主目录'
             window.disk_path = Path.home() / '一' / '二' / '三' / '四' / '五'
@@ -167,9 +167,10 @@ def tick():
             records = window.recovery.records()
             assert len(records) == 1
             # Restoration belongs to the file manager; no duplicate trash page.
+            assert 'trash' not in window.nav
             assert window.stack.get_child_by_name('trash') is None
             with patch('gi.repository.Gio.AppInfo.launch_default_for_uri') as opened:
-                window.navigate('trash')
+                window.open_system_trash()
                 opened.assert_called_once_with('trash:///', None)
             window.recovery.restore(records[0]['id'])
             phase = 8
