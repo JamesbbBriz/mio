@@ -1,14 +1,38 @@
 """Non-blocking character animation, driven only by completed operations."""
 import math
+import json
 from pathlib import Path
 import cairo
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gtk, Pango, PangoCairo
+
+
+# One playthrough: anticipation, fast impact, slower recovery. The final pose
+# stays visible for the existing receipt/fade; no animation drives a mutation.
+SLASH_FRAME_MS = (90, 90, 90, 90, 90, 90, 100, 100, 100, 60, 60, 60, 90, 90, 90, 150, 150, 300)
+SLASH_FRAME_COUNT = len(SLASH_FRAME_MS)
+
+
+def slash_frame_at(seconds):
+    milliseconds = max(0, seconds * 1000)
+    boundary = 0
+    for index, duration in enumerate(SLASH_FRAME_MS):
+        boundary += duration
+        if milliseconds < boundary:
+            return index
+    return SLASH_FRAME_COUNT - 1
 
 
 class SlashCelebration(Gtk.DrawingArea):
     def __init__(self):
         super().__init__(hexpand=True, vexpand=True, can_target=False)
-        self.sprite = cairo.ImageSurface.create_from_png(str(Path(__file__).resolve().parents[1] / 'assets/mio-slash.png'))
+        self.sprite = cairo.ImageSurface.create_from_png(str(Path(__file__).resolve().parents[1] / 'assets/mio-slash-18.png'))
+        atlas = json.loads((Path(__file__).resolve().parents[1] / 'assets/mio-slash-18.json').read_text())
+        self.frame_rects = atlas['frames']
+        assert len(self.frame_rects) == SLASH_FRAME_COUNT
+        assert atlas['durations_ms'] == list(SLASH_FRAME_MS)
         self.set_draw_func(self.draw)
         self.set_visible(False)
         self.tick_id = None
@@ -82,20 +106,26 @@ class SlashCelebration(Gtk.DrawingArea):
                     cr.rectangle(-10, -10, 20, 20)
                     cr.fill()
                     cr.restore()
-            # Character dashes from the right, then settles alongside the slash.
-            approach = min(1, t / .72)
-            x = width + 40 + (cx - 65 - width - 40) * (1 - (1 - approach) ** 3)
-            y = cy - 150 + (math.sin(t * 30) * 7 if t < .72 else 0)
-            scale = min(320, width * .31) / self.sprite.get_width()
+            # Clip one of the 18 genuinely distinct poses from the 6×3 atlas.
+            frame = slash_frame_at(t)
+            sx, sy, frame_width, frame_height = self.frame_rects[frame]
+            display_size = min(400, width * .48)
+            approach = min(1, t / .54)
+            destination = cx - display_size / 2
+            x = width + 30 + (destination - width - 30) * (1 - (1 - approach) ** 3)
+            y = cy - display_size / 2
             cr.save()
             cr.translate(x, y)
-            cr.rotate(-.09 * math.sin(min(1, max(0, (t - .65) / .5)) * math.pi))
+            scale = min(display_size / frame_width, display_size / frame_height)
+            cr.translate((display_size - frame_width * scale) / 2, (display_size - frame_height * scale) / 2)
             cr.scale(scale, scale)
-            cr.set_source_surface(self.sprite)
+            cr.rectangle(0, 0, frame_width, frame_height)
+            cr.clip()
+            cr.set_source_surface(self.sprite, -sx, -sy)
             cr.paint_with_alpha(fade)
             cr.restore()
-            if .65 < t < 1.3:
-                stroke = math.sin((t - .65) / .65 * math.pi)
+            if .84 < t < 1.14:
+                stroke = math.sin((t - .84) / .30 * math.pi)
                 for line_width, color in [(22, (.95, .55, .83)), (11, (.55, .83, 1)), (4, (1, 1, 1))]:
                     cr.set_source_rgba(*color, stroke * fade)
                     cr.set_line_width(line_width)

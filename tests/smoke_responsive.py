@@ -75,12 +75,19 @@ def tick():
             assert all(d.get_visible() == (height > 680) for d in w.page_decorations)
             assert w.split_view.get_collapsed() == (width <= 1000)
             assert (w.chart_row.get_orientation() == Gtk.Orientation.VERTICAL) == (width <= 740)
-            assert isinstance(w.window_handle, Gtk.WindowHandle)
-            valid, title_bounds = w.window_title.compute_bounds(w)
-            picked = w.pick(title_bounds.get_x() + title_bounds.get_width() / 2,
-                            title_bounds.get_y() + title_bounds.get_height() / 2, Gtk.PickFlags.DEFAULT)
-            assert picked is w.window_handle or picked.is_ancestor(w.window_handle), 'titlebar drag region obstructed'
-            assert w.window_handle.get_height() >= 34
+            assert not hasattr(w, 'window_handle'), 'visible titlebar returned'
+            assert w.is_top_drag_point(width / 2, 12)
+            assert not w.is_top_drag_point(width / 2, 70)
+            from unittest.mock import Mock, patch
+            gesture, surface = Mock(), Mock()
+            gesture.get_current_event_device.return_value = object()
+            gesture.get_current_event_time.return_value = 1234
+            with patch.object(w, 'get_surface', return_value=surface):
+                w.drag_top_background(gesture, 1, width / 2, 12)
+            surface.begin_move.assert_called_once_with(gesture.get_current_event_device.return_value, 1, width / 2, 12, 1234)
+            if w.menu_toggle.get_visible():
+                valid, bounds = w.menu_toggle.compute_bounds(w)
+                assert not w.is_top_drag_point(bounds.get_x() + bounds.get_width() / 2, bounds.get_y() + bounds.get_height() / 2)
             scroller = w.stack.get_visible_child()
             adj = scroller.get_hadjustment()
             assert adj.get_upper() <= adj.get_page_size() + 2, (page, width, 'horizontal overflow')

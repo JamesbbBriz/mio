@@ -156,25 +156,21 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         outer.set_child(split)
         self.celebration = SlashCelebration()
         outer.add_overlay(self.celebration)
-        # Reserve a real titlebar row: overlays must not cover navigation or
-        # leave dragging dependent on small labels inside a scrolling page.
-        header = box(False, 8, "window-toolbar")
+        # Frameless appearance: only the controls are overlaid. The window's
+        # capture controller delegates top-background drags to the compositor,
+        # without putting an invisible input-blocking widget over the page.
         self.menu_toggle = Gtk.Button(icon_name="sidebar-show-symbolic", tooltip_text="显示／收起功能导航",
-                                      valign=Gtk.Align.CENTER, visible=False)
+                                      halign=Gtk.Align.START, valign=Gtk.Align.START,
+                                      margin_start=8, margin_top=6, visible=False)
         self.menu_toggle.connect("clicked", lambda _: split.set_show_sidebar(not split.get_show_sidebar()))
-        header.append(self.menu_toggle)
-        self.window_title = label("Mio · 澪", "window-title")
-        self.window_title.set_hexpand(True)
-        self.window_title.set_ellipsize(Pango.EllipsizeMode.END)
-        self.window_title.set_can_target(False)
-        header.append(self.window_title)
-        header.append(Gtk.WindowControls(side=Gtk.PackType.END, valign=Gtk.Align.CENTER))
-        self.window_handle = Gtk.WindowHandle(child=header)
-        shell = box(spacing=0)
-        shell.append(self.window_handle)
-        outer.set_vexpand(True)
-        shell.append(outer)
-        self.set_content(shell)
+        outer.add_overlay(self.menu_toggle)
+        outer.add_overlay(Gtk.WindowControls(side=Gtk.PackType.END, halign=Gtk.Align.END,
+                                             valign=Gtk.Align.START, margin_top=6, margin_end=8))
+        self.set_content(outer)
+        self.drag_gesture = Gtk.GestureClick(button=1)
+        self.drag_gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        self.drag_gesture.connect("pressed", self.drag_top_background)
+        self.add_controller(self.drag_gesture)
         self.build_overview()
         self.build_cache()
         self.build_disk()
@@ -184,6 +180,33 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.navigate("overview")
         self.refresh_status()
         self.timer = GLib.timeout_add_seconds(2, self.refresh_status)
+
+    def is_top_drag_point(self, x, y):
+        if not (0 <= y < 44 and 0 <= x < self.get_width()):
+            return False
+        picked = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        if picked is None:
+            return False
+        # Never steal clicks from controls, including controls scrolled into
+        # the top strip, the navigation drawer, or a map selection.
+        while picked is not None and picked is not self:
+            if isinstance(picked, (Gtk.Button, Gtk.MenuButton, Gtk.Editable, Gtk.TextView, Gtk.Switch, Gtk.DropDown,
+                                   Gtk.ListBoxRow, Gtk.DrawingArea, Gtk.Range, Gtk.CheckButton)):
+                return False
+            picked = picked.get_parent()
+        return True
+
+    def drag_top_background(self, gesture, presses, x, y):
+        if not self.is_top_drag_point(x, y):
+            return
+        device = gesture.get_current_event_device()
+        if device is None:
+            return
+        if presses == 2:
+            self.unmaximize() if self.is_maximized() else self.maximize()
+        else:
+            self.get_surface().begin_move(device, 1, x, y, gesture.get_current_event_time())
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
     def setup_responsive(self):
         # Libadwaita applies the last matching breakpoint. Register specific
@@ -254,8 +277,6 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         if self.split_view.get_collapsed():
             self.split_view.set_show_sidebar(False)
         self.stack.set_visible_child_name(key)
-        titles = {"overview": "系统概览", "cache": "缓存清理", "disk": "磁盘分析", "apps": "应用管理", "maintenance": "系统维护"}
-        self.window_title.set_label("Mio · " + titles[key])
         for name, nav in self.nav.items():
             (nav.add_css_class if name == key else nav.remove_css_class)("active")
         if key == "apps" and key not in self.completed:
