@@ -386,8 +386,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         page.append(self.disk_summary)
         page.append(self.disk_note)
         actions = box(False, 10)
-        self.disk_delete = button("移入系统回收站…", lambda _: self.review_disk_delete())
-        self.disk_delete.set_sensitive(False)
+        self.disk_delete = button("删除所选…", lambda _: self.review_disk_delete(), "suggested-action")
+        self.disk_delete.set_tooltip_text("删除所选文件或文件夹：确认后移入系统回收站，可恢复")
         actions.append(self.disk_delete)
         self.disk_action_note = label("选中文件或文件夹，再确认移入系统回收站。", "small muted", wrap=True)
         actions.append(self.disk_action_note)
@@ -465,7 +465,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             self.jobs.discard("disk")
             if self.cancel.is_set():
                 return False
-            for control in (self.disk_button, self.parent_button, self.choose_button, self.home_button):
+            for control in (self.disk_button, self.parent_button, self.choose_button, self.home_button, self.disk_delete):
                 control.set_sensitive(True)
             self.stop_button.set_sensitive(False)
             self.disk_spinner.stop()
@@ -580,7 +580,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         if self.disk_mutating or "disk" in self.jobs:
             return
         self.disk_selected = entry if any(entry is e for e in self.current_disk_scan.entries) else None
-        self.disk_delete.set_sensitive(self.disk_selected is not None and entry.complete and not self.current_disk_scan.partial)
+        self.disk_delete.set_sensitive(True)
         total = self.current_disk_scan.size
         percent = f"{entry.size / total:.1%}" if total else "0%"
         incomplete = " · 未完整扫描" if not entry.complete else ""
@@ -589,7 +589,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
 
     def show_disk(self, scan):
         self.disk_selected = None
-        self.disk_delete.set_sensitive(False)
+        self.disk_delete.set_sensitive(True)
         self.disk_path = scan.root
         self.current_disk_scan = scan
         self.disk_visible_limit = 100

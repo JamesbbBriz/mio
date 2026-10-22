@@ -130,8 +130,14 @@ class OperationsUI:
             return
         entry = self.disk_selected
         scan = getattr(self, 'current_disk_scan', None)
-        if entry is None or scan is None or scan.partial or not entry.complete or not any(entry is e for e in scan.entries):
-            self.disk_action_note.set_label('请从完整扫描结果中选中一个文件或文件夹')
+        if scan is None:
+            self.disk_action_note.set_label('请先点击“扫描此目录”，再单击一个方块或列表中的“选择”')
+            return
+        if entry is None or not any(entry is e for e in scan.entries):
+            self.disk_action_note.set_label('请先单击要删除的方块，或点击右侧列表中的“选择”')
+            return
+        if scan.partial or not entry.complete:
+            self.disk_action_note.set_label('当前是部分扫描结果，不能删除。请进入较小目录，点击“扫描此目录”完成扫描后再选择。')
             return
         root, generation = scan.root, self.disk_generation
         self.disk_mutating = True
@@ -145,7 +151,7 @@ class OperationsUI:
 
         def unlock():
             self.disk_mutating = False
-            self.disk_delete.set_sensitive(self.disk_selected is not None)
+            self.disk_delete.set_sensitive(True)
 
         def ready(result):
             plan, error = result

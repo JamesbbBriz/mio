@@ -27,10 +27,23 @@ def tick():
         assert time.monotonic() < deadline, 'disk deletion GUI timeout'
         if phase == 0:
             w.navigate('disk')
+            assert w.disk_delete.get_label() == '删除所选…'
+            assert w.disk_delete.get_sensitive()
+            w.disk_delete.emit('clicked')
+            assert '扫描此目录' in w.disk_action_note.get_label()
+            assert not w.operation_busy
             w.start_disk(source)
             phase = 1
         elif phase == 1 and 'disk' in w.completed:
+            w.disk_delete.emit('clicked')
+            assert '请先单击' in w.disk_action_note.get_label()
+            assert not w.operation_busy
             w.treemap.select(w.current_disk_scan.entries[0])
+            w.current_disk_scan.partial = True
+            w.disk_delete.emit('clicked')
+            assert '部分扫描结果' in w.disk_action_note.get_label()
+            assert not w.operation_busy
+            w.current_disk_scan.partial = False
             w.disk_delete.emit('clicked')
             phase = 2
         elif phase == 2 and not w.operation_busy:
@@ -65,7 +78,8 @@ def tick():
         elif phase == 7 and not w.disk_mutating and 'disk' not in w.jobs:
             assert not w.current_disk_scan.entries
             assert not w.disk_nodes.get(folder)
-            assert not w.disk_delete.get_sensitive()
+            assert w.disk_delete.get_sensitive()
+            assert w.disk_selected is None
             ok = True
             app.quit()
             return False
