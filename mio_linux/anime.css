@@ -61,3 +61,7 @@ flowboxchild { padding: 0; }
 
 
 .compact-sidebar .eyebrow { padding-left: 40px; }
+
+.nav-memory.active { border-color: #cda16e; }
+.memory-group { padding: 12px; background: #fff8fd; border: 1px solid #e4cfe9; border-radius: 14px; }
+.memory-process { padding: 10px; background: #f5eefb; border-radius: 10px; }

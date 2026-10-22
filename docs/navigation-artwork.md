@@ -2,6 +2,8 @@
 
 Original artwork generated with OpenAI built-in image generation. Each PNG is a full-width background for one native GTK button; labels remain native accessible text. The six designs have distinct characters, palettes and props.
 
+The original amber `trash.png` character is now reused by the memory diagnosis page as 琥珀 / 内存巡查员. The separate trash page remains removed; the filename preserves the artwork provenance.
+
 ## Exact generation prompts
 
 ### overview

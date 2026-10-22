@@ -18,6 +18,7 @@ from .disk_view import Treemap
 from .operations_ui import OperationsUI
 from .celebration import SlashCelebration
 from .character_nav import CharacterNav
+from .memory_ui import MemoryUI
 
 
 CSS = """
@@ -91,7 +92,7 @@ def clear(widget: Gtk.Box | Gtk.ListBox) -> None:
         widget.remove(child)
 
 
-class Window(OperationsUI, Adw.ApplicationWindow):
+class Window(MemoryUI, OperationsUI, Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Mio · 澪", default_width=1120, default_height=860)
         self.set_size_request(420, 420)
@@ -135,6 +136,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             ("disk", "磁盘分析", "drive-harddisk-symbolic"),
             ("apps", "应用管理", "application-x-executable-symbolic"),
             ("maintenance", "系统维护", "preferences-system-symbolic"),
+            ("memory", "内存诊断", "system-run-symbolic"),
         ]:
             nav = CharacterNav(key, title)
             nav.connect("clicked", lambda _, name=key: self.navigate(name))
@@ -176,6 +178,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.build_disk()
         self.build_apps()
         self.setup_operations()
+        self.build_memory()
         self.setup_responsive()
         self.navigate("overview")
         self.refresh_status()
@@ -248,6 +251,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.operation_cancel.set()
         self.disk_cancel.set()
         GLib.source_remove(self.timer)
+        GLib.source_remove(self.memory_timer)
         return False
 
     def page(self, key, number, title, subtitle):
@@ -265,6 +269,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         companion.append(avatar)
         lines = {"overview": "澪 · 今天也一起照顾电脑吧。", "cache": "澪 · 确认清单后，我来帮你收纳。", "disk": "澪 · 方块越大，藏着的文件越多。", "apps": "澪 · 先确认软件来源，再决定去留。", "maintenance": "澪 · 系统操作的每一步，都交给你确认。"}
         companion.append(label(lines.get(key, "澪 · 我在这里。"), "character-note", wrap=True))
+        if key == "memory":
+            companion.get_last_child().set_label("琥珀 · 先找到失联的父进程，再决定要不要告别。")
         content.append(companion)
         self.page_decorations.append(companion)
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
@@ -280,6 +286,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.stack.set_visible_child_name(key)
         for name, nav in self.nav.items():
             (nav.add_css_class if name == key else nav.remove_css_class)("active")
+        if key == "memory" and self.memory_snapshot is None:
+            self.start_memory()
         if key == "apps" and key not in self.completed:
             self.load_apps()
 

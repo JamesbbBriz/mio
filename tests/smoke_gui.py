@@ -68,7 +68,7 @@ def tick():
             raise TimeoutError("GUI scan callbacks did not complete")
         if phase == 0:
             assert window.get_mapped()
-            assert len({nav.art_path for nav in window.nav.values()}) == 5
+            assert len({nav.art_path for nav in window.nav.values()}) == 6
             window.stack.set_transition_duration(0)
             assert window.breadcrumbs.get_first_child().get_label() == '主目录'
             window.disk_path = Path.home() / '一' / '二' / '三' / '四' / '五'

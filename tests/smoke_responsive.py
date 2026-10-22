@@ -1,5 +1,6 @@
 """Check actual GTK allocations at desktop and compact window sizes."""
 import time
+import sys
 import gi
 gi.require_version("Graphene", "1.0")
 from pathlib import Path
@@ -14,12 +15,18 @@ for name in ['a', 'a-very-long-folder-name-without-spaces-' * 4]:
     (root / name).mkdir()
     (root / name / 'file').write_bytes(b'x' * 2048)
 sizes = [(1120, 860), (850, 600), (600, 700), (420, 600), (1600, 1000), (420, 420)]
-pages = ['overview', 'cache', 'disk', 'apps', 'maintenance']
+pages = ['overview', 'cache', 'disk', 'apps', 'maintenance', 'memory']
 cases = [(size, page) for size in sizes for page in pages]
 phase = 0
 index = 0
 ready_at = 0
 ok = False
+callback_errors = []
+original_hook = sys.excepthook
+def report_callback_error(kind, error, traceback):
+    callback_errors.append(str(error))
+    original_hook(kind, error, traceback)
+sys.excepthook = report_callback_error
 output = Path('artifacts'); output.mkdir(exist_ok=True)
 
 
@@ -139,4 +146,5 @@ GLib.timeout_add_seconds(60, lambda: (app.quit(), False)[1])
 app.run(['mio-responsive-test'])
 temp.cleanup()
 assert ok
+assert not callback_errors, callback_errors
 print(f'Responsive GUI passed: {len(cases)} page/size combinations')

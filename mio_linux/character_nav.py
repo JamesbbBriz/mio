@@ -9,6 +9,7 @@ ROLES = {
     'disk': ('月织', '星图绘师'),
     'apps': ('青叶', '应用图书馆员'),
     'trash': ('琥珀', '归还守护者'),
+    'memory': ('琥珀', '内存巡查员'),
     'maintenance': ('苍音', '机械工程师'),
 }
 
@@ -16,7 +17,7 @@ ROLES = {
 class CharacterNav(Gtk.Button):
     def __init__(self, key, title):
         super().__init__(css_classes=['nav', 'character-nav', 'nav-' + key])
-        self.art_path = Path(__file__).resolve().parents[1] / 'assets/navigation' / (key + '.png')
+        self.art_path = Path(__file__).resolve().parents[1] / 'assets/navigation' / (('trash' if key == 'memory' else key) + '.png')
         name, role = ROLES[key]
         self.set_tooltip_text(f'{title} · {name} / {role}')
         self.update_property([Gtk.AccessibleProperty.LABEL], [f'{title}，{name}，{role}'])
