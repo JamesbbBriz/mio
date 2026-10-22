@@ -187,14 +187,19 @@ class OperationsUI:
                     if ok:
                         target = (bounds.get_x() + tile.x + tile.width / 2,
                                   bounds.get_y() + tile.y + tile.height / 2)
-                self.celebration.play(1, 1, target=target)
+                effect = self.treemap.capture_tile(plan.path, self.celebration)
+                self.celebration.play(1, 1, target=target, tile_effect=effect)
+                if effect and self.celebration.animate:
+                    self.treemap.concealed_path = plan.path
+                    self.treemap.queue_draw()
                 def refresh():
                     if self.cancel.is_set():
                         return False
                     unlock()
                     self.start_disk(root)
                     return False
-                GLib.timeout_add(950 if self.celebration.animate else 1, refresh)
+                from .shatter import REFRESH_AFTER_MS
+                GLib.timeout_add(REFRESH_AFTER_MS if self.celebration.animate else 1, refresh)
             self.operation(lambda: attempt(lambda: trash_disk(plan, self.operation_cancel)), moved, self.disk_action_note)
         self.operation(lambda: attempt(lambda: plan_disk(entry.path, self.operation_cancel)), ready, self.disk_action_note)
 

@@ -6,7 +6,7 @@ import cairo
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("PangoCairo", "1.0")
-from gi.repository import Gtk, Pango, PangoCairo
+from gi.repository import GLib, Gtk, Pango, PangoCairo
 
 
 # One playthrough: anticipation, fast impact, slower recovery. The final pose
@@ -25,6 +25,15 @@ def slash_frame_at(seconds):
     return SLASH_FRAME_COUNT - 1
 
 
+def slash_frame_blend(seconds):
+    """Briefly blend adjacent poses while motion follows the display frame clock."""
+    frame = slash_frame_at(seconds)
+    end = sum(SLASH_FRAME_MS[:frame + 1]) / 1000
+    weight = min(1, max(0, (seconds - end + .028) / .028))
+    weight = weight * weight * (3 - 2 * weight)
+    return frame, min(frame + 1, SLASH_FRAME_COUNT - 1), weight
+
+
 class SlashCelebration(Gtk.DrawingArea):
     def __init__(self):
         super().__init__(hexpand=True, vexpand=True, can_target=False)
@@ -40,19 +49,21 @@ class SlashCelebration(Gtk.DrawingArea):
         self.play_count = 0
         self.caption = ''
         self.enabled = True
+        self.tile_effect = None
 
-    def play(self, completed=0, total=0, preview=False, target=None):
+    def play(self, completed=0, total=0, preview=False, target=None, tile_effect=None):
         if not preview and completed <= 0:
             return
         self.stop()
         self.target = target
+        self.tile_effect = tile_effect
         self.play_count += 1
         self.caption = '动作预览 · 未操作文件' if preview else f'已收纳 {completed} 项 · 可在系统回收站恢复'
         if not preview and completed < total:
             self.caption += f'\n另有 {total - completed} 项未处理'
         self.animate = self.enabled and Gtk.Settings.get_default().get_property('gtk-enable-animations')
         self.elapsed = 0
-        self.started = None
+        self.started = GLib.get_monotonic_time() / 1_000_000
         self.set_visible(True)
         self.tick_id = self.add_tick_callback(self.tick)
         self.queue_draw()
@@ -62,15 +73,15 @@ class SlashCelebration(Gtk.DrawingArea):
             self.remove_tick_callback(self.tick_id)
             self.tick_id = None
         self.set_visible(False)
+        self.tile_effect = None
 
     def tick(self, widget, clock):
         now = clock.get_frame_time() / 1_000_000
-        if self.started is None:
-            self.started = now
-        self.elapsed = now - self.started
+        self.elapsed = max(0, now - self.started)
         if self.elapsed > (2.8 if self.animate else 2):
             self.tick_id = None
             self.set_visible(False)
+            self.tile_effect = None
             return False
         self.queue_draw()
         return True
@@ -85,15 +96,34 @@ class SlashCelebration(Gtk.DrawingArea):
         cr.move_to(x, y)
         PangoCairo.show_layout(cr, layout)
 
+    def draw_pose(self, cr, frame, display_size, alpha):
+        sx, sy, frame_width, frame_height = self.frame_rects[frame]
+        cr.save()
+        scale = min(display_size / frame_width, display_size / frame_height)
+        cr.translate((display_size - frame_width * scale) / 2, (display_size - frame_height * scale) / 2)
+        cr.scale(scale, scale)
+        cr.rectangle(0, 0, frame_width, frame_height)
+        cr.clip()
+        cr.set_source_surface(self.sprite, -sx, -sy)
+        cr.paint_with_alpha(alpha)
+        cr.restore()
+
     def draw(self, area, cr, width, height):
         t = self.elapsed
         fade = min(1, max(0, (2.8 - t) / .45)) if self.animate else 1
         cx, cy = self.target if self.target else (width * .58, min(height * .56, height - 180))
+        if self.tile_effect:
+            bounds = self.tile_effect.bounds()
+            if bounds:
+                x, y, w, h = bounds
+                cx, cy = x + w / 2, y + h / 2
         cx, cy = max(60, min(width - 60, cx)), max(90, min(height - 100, cy))
         if self.animate:
+            if self.tile_effect:
+                self.tile_effect.draw(cr, t)
             # Abstract cache fragments: a visual receipt, not a second file operation.
             burst = max(0, min(1, (t - .75) / .9))
-            if t < 1.7:
+            if self.tile_effect is None and .75 < t < 1.7:
                 for i in range(14):
                     angle = i * 2.399
                     distance = 22 + burst * (65 + i * 6)
@@ -107,24 +137,34 @@ class SlashCelebration(Gtk.DrawingArea):
                     cr.fill()
                     cr.restore()
             # Clip one of the 18 genuinely distinct poses from the 6×3 atlas.
-            frame = slash_frame_at(t)
-            sx, sy, frame_width, frame_height = self.frame_rects[frame]
-            display_size = min(400, width * .48)
+            frame, next_frame, blend = slash_frame_blend(t)
+            display_size = min(360, width * .44)
             approach = min(1, t / .54)
             destination = cx - display_size / 2
             x = width + 30 + (destination - width - 30) * (1 - (1 - approach) ** 3)
             y = cy - display_size / 2
+            # Continuous follow-through between illustrated poses avoids a
+            # static cutout sliding across the screen. No file work runs here.
+            impulse = math.sin(min(1, max(0, (t - .78) / .48)) * math.pi)
+            x += 18 * impulse
+            y -= 8 * math.sin(min(1, t / .54) * math.pi)
             cr.save()
             cr.translate(x, y)
-            scale = min(display_size / frame_width, display_size / frame_height)
-            cr.translate((display_size - frame_width * scale) / 2, (display_size - frame_height * scale) / 2)
-            cr.scale(scale, scale)
-            cr.rectangle(0, 0, frame_width, frame_height)
-            cr.clip()
-            cr.set_source_surface(self.sprite, -sx, -sy)
+            # Add premultiplied images inside a group so matching opaque pixels
+            # stay opaque during the short dissolve (no brightness flicker).
+            cr.push_group()
+            self.draw_pose(cr, frame, display_size, 1 - blend)
+            if blend:
+                cr.set_operator(cairo.OPERATOR_ADD)
+                self.draw_pose(cr, next_frame, display_size, blend)
+            pattern = cr.pop_group()
+            cr.set_operator(cairo.OPERATOR_OVER)
+            cr.set_source(pattern)
             cr.paint_with_alpha(fade)
             cr.restore()
-            if .84 < t < 1.14:
+            if self.tile_effect:
+                self.tile_effect.draw_cut(cr, t)
+            elif .84 < t < 1.14:
                 stroke = math.sin((t - .84) / .30 * math.pi)
                 for line_width, color in [(22, (.95, .55, .83)), (11, (.55, .83, 1)), (4, (1, 1, 1))]:
                     cr.set_source_rgba(*color, stroke * fade)

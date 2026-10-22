@@ -7,7 +7,11 @@ Generated with the built-in OpenAI image generation tool, using the existing ori
 - [GIF preview](../assets/mio-slash-18.gif)
 - Exporter: `python3 scripts/export_slash_animation.py` (Pillow required only for export).
 
-The app plays the sequence once only after a successful operation; it then holds/fades the last pose. Failed/cancelled/zero-success operations never play a success animation. Reduced motion keeps the static receipt. The impact frames coincide with the disk view refresh. No animation performs filesystem mutations.
+The app plays the sequence once only after a successful operation; it then holds/fades the last pose. Failed/cancelled/zero-success operations never play a success animation. Reduced motion keeps the static receipt. For disk deletion, impact cuts a snapshot of the selected tile into two halves, then into textured fragments; neighbouring tiles reflow only after the fragments clear (2.05 seconds). A 28 ms blend between the 18 poses and continuous motion follow the GTK frame clock. The snapshot retains the original filename, size, colour and selection border, and follows the tile bounds when the window resizes. Reduced motion skips the fragments and refreshes immediately. No animation performs filesystem mutations.
+
+## Tile effect preview
+
+Run `python3 -m scripts.preview_tile_shatter` in a graphical session (or Xvfb) to render `artifacts/mio-tile-shatter.gif` using the actual renderer and synthetic tiles. This preview never operates on files. Pillow is only needed for exporting the GIF.
 
 ## Initial prompt
 

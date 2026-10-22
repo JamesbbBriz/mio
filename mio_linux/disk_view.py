@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import colorsys
 import hashlib
+import math
+import cairo
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -26,6 +28,7 @@ class Treemap(Gtk.DrawingArea):
         self.tiles = []
         self.selected = None
         self.hovered = None
+        self.concealed_path = None
         self.on_select = on_select
         self.on_activate = on_activate
         self.empty_text = "开始扫描，让空间分布一目了然"
@@ -44,6 +47,7 @@ class Treemap(Gtk.DrawingArea):
         self.add_controller(keys)
 
     def set_entries(self, entries):
+        self.concealed_path = None
         self.entries = sorted(entries, key=lambda entry: (-entry.size, entry.path.name.casefold()))
         self.selected = None
         self.tiles = []
@@ -118,26 +122,52 @@ class Treemap(Gtk.DrawingArea):
             self.text(cr, "此目录没有非空普通文件" if self.entries else self.empty_text, 20, height / 2 - 10, width - 40)
             return
         for tile in self.tiles:
-            x, y, w, h = tile.x + 1.5, tile.y + 1.5, max(0, tile.width - 3), max(0, tile.height - 3)
-            cr.save()
-            cr.rectangle(x, y, w, h)
-            cr.clip()
-            rgb = color_for(tile.entry)
-            selected = self.selected is not None and tile.entry.path == self.selected.path
-            if selected:
-                rgb = tuple(min(1, c + .09) for c in rgb)
-            cr.set_source_rgb(*rgb)
-            cr.paint()
-            if w >= 55 and h >= 36:
-                cr.set_source_rgb(.25, .20, .36)
-                self.text(cr, tile.entry.path.name, x + 12, y + 10, w - 24, 11, True)
-                if h >= 64:
-                    self.text(cr, human_size(tile.entry.size), x + 12, y + 33, w - 24, 10)
-                if h >= 92 and tile.entry.is_dir:
-                    self.text(cr, "双击浏览  →", x + 12, y + h - 30, w - 24, 9)
-            cr.restore()
-            if selected:
-                cr.set_source_rgb(.57, .35, .64)
-                cr.set_line_width(3)
-                cr.rectangle(x + 1.5, y + 1.5, max(0, w - 3), max(0, h - 3))
-                cr.stroke()
+            if tile.entry.path != self.concealed_path:
+                self.draw_tile(cr, tile)
+
+    def capture_tile(self, path, overlay):
+        from .shatter import TileShatter
+        tile = next((t for t in self.tiles if t.entry.path == path), None)
+        if tile is None or tile.width < 1 or tile.height < 1:
+            return None
+
+        def bounds():
+            current = next((t for t in self.tiles if t.entry.path == path), None)
+            ok, rect = self.compute_bounds(overlay)
+            if not ok or current is None:
+                return None
+            return (rect.get_x() + current.x, rect.get_y() + current.y,
+                    current.width, current.height)
+
+        if bounds() is None:
+            return None
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, math.ceil(tile.width), math.ceil(tile.height))
+        cr = cairo.Context(surface)
+        cr.translate(-tile.x, -tile.y)
+        self.draw_tile(cr, tile)
+        return TileShatter(surface, tile.width, tile.height, bounds)
+
+    def draw_tile(self, cr, tile):
+        x, y, w, h = tile.x + 1.5, tile.y + 1.5, max(0, tile.width - 3), max(0, tile.height - 3)
+        cr.save()
+        cr.rectangle(x, y, w, h)
+        cr.clip()
+        rgb = color_for(tile.entry)
+        selected = self.selected is not None and tile.entry.path == self.selected.path
+        if selected:
+            rgb = tuple(min(1, c + .09) for c in rgb)
+        cr.set_source_rgb(*rgb)
+        cr.paint()
+        if w >= 55 and h >= 36:
+            cr.set_source_rgb(.25, .20, .36)
+            self.text(cr, tile.entry.path.name, x + 12, y + 10, w - 24, 11, True)
+            if h >= 64:
+                self.text(cr, human_size(tile.entry.size), x + 12, y + 33, w - 24, 10)
+            if h >= 92 and tile.entry.is_dir:
+                self.text(cr, "双击浏览  →", x + 12, y + h - 30, w - 24, 9)
+        cr.restore()
+        if selected:
+            cr.set_source_rgb(.57, .35, .64)
+            cr.set_line_width(3)
+            cr.rectangle(x + 1.5, y + 1.5, max(0, w - 3), max(0, h - 3))
+            cr.stroke()

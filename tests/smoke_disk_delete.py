@@ -18,6 +18,7 @@ phase = 0
 ok = False
 deadline = time.monotonic() + 35
 mock = None
+seen_phases = set()
 
 
 def tick():
@@ -74,12 +75,24 @@ def tick():
             assert not folder.exists()
             assert w.celebration.play_count == 1
             assert w.celebration.target is not None
+            assert w.celebration.tile_effect is not None
+            assert w.treemap.concealed_path == folder
             phase = 7
-        elif phase == 7 and not w.disk_mutating and 'disk' not in w.jobs:
+        elif phase == 7:
+            effect = w.celebration.tile_effect
+            if w.disk_mutating:
+                assert effect is not None
+                seen_phases.add(effect.phase(w.celebration.elapsed))
+                assert w.current_disk_scan.entries, 'Map refreshed before fragments cleared'
+                return True
+            if 'disk' in w.jobs:
+                return True
             assert not w.current_disk_scan.entries
             assert not w.disk_nodes.get(folder)
             assert w.disk_delete.get_sensitive()
             assert w.disk_selected is None
+            assert w.treemap.concealed_path is None
+            assert {'intact', 'split', 'shatter'} <= seen_phases, seen_phases
             ok = True
             app.quit()
             return False
