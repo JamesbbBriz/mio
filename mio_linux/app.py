@@ -10,7 +10,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk, Gdk
+from gi.repository import Adw, Gio, GLib, Gtk, Gdk, Pango
 
 from .backend import cache_root, cpu_percent, cpu_ticks, disk_stats, human_size, memory_stats, scan_directory
 from .backend import Entry, Scan
@@ -58,6 +58,8 @@ ASSETS = Path(__file__).resolve().parents[1] / "assets"
 
 def label(text: str, css: str = "", *, wrap: bool = False) -> Gtk.Label:
     widget = Gtk.Label(label=text, xalign=0, wrap=wrap)
+    if wrap:
+        widget.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
     for name in css.split():
         widget.add_css_class(name)
     return widget
@@ -68,6 +70,12 @@ def box(vertical: bool = True, spacing: int = 12, css: str = "") -> Gtk.Box:
     for name in css.split():
         widget.add_css_class(name)
     return widget
+
+
+def flow():
+    return Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=False,
+                       row_spacing=6, column_spacing=6, min_children_per_line=1,
+                       max_children_per_line=12, valign=Gtk.Align.START)
 
 
 def button(text: str, callback, css: str = "") -> Gtk.Button:
@@ -86,12 +94,14 @@ def clear(widget: Gtk.Box | Gtk.ListBox) -> None:
 class Window(OperationsUI, Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Mio · 澪", default_width=1120, default_height=860)
-        self.set_size_request(850, 600)
+        self.set_size_request(420, 420)
         self.set_icon_name("io.github.jamesbbbriz.Mio")
         self.cancel = threading.Event()
         self.jobs = set()
         self.completed = set()
         self.errors = []
+        self.page_decorations = []
+        self.pages = []
         self.disk_path = Path.home()
         self.disk_scan = None
         self.disk_nodes = {}
@@ -101,7 +111,9 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.previous_cpu = cpu_ticks()
         self.connect("close-request", self.on_close)
         outer = Gtk.Overlay()
-        split = box(False, 0)
+        split = Adw.OverlaySplitView(min_sidebar_width=254, max_sidebar_width=254,
+                                     sidebar_width_unit=Adw.LengthUnit.PX)
+        self.split_view = split
         sidebar = box(spacing=8, css="sidebar")
         sidebar.set_size_request(254, -1)
         brand = box(False, 10)
@@ -139,22 +151,61 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         sidebar.append(footer)
         sidebar_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vscrollbar_policy=Gtk.PolicyType.AUTOMATIC)
         sidebar_scroll.set_child(sidebar)
-        split.append(sidebar_scroll)
-        split.append(self.stack)
+        split.set_sidebar(sidebar_scroll)
+        split.set_content(self.stack)
         outer.set_child(split)
         controls = Gtk.WindowControls(side=Gtk.PackType.END, halign=Gtk.Align.END, valign=Gtk.Align.START, margin_top=6, margin_end=8)
         self.celebration = SlashCelebration()
         outer.add_overlay(self.celebration)
         outer.add_overlay(controls)
+        self.menu_toggle = Gtk.Button(icon_name="sidebar-show-symbolic", tooltip_text="显示功能导航",
+                                      halign=Gtk.Align.START, valign=Gtk.Align.START, margin_top=6, margin_start=8,
+                                      visible=False)
+        self.menu_toggle.connect("clicked", lambda _: split.set_show_sidebar(not split.get_show_sidebar()))
+        outer.add_overlay(self.menu_toggle)
         self.set_content(outer)
         self.build_overview()
         self.build_cache()
         self.build_disk()
         self.build_apps()
         self.setup_operations()
+        self.setup_responsive()
         self.navigate("overview")
         self.refresh_status()
         self.timer = GLib.timeout_add_seconds(2, self.refresh_status)
+
+    def setup_responsive(self):
+        # Libadwaita applies the last matching breakpoint. Register specific
+        # width/height combinations last so both dimensions adapt together.
+        for max_width in (None, 1000, 740):
+            for short in (False, True):
+                if max_width is None and not short:
+                    continue
+                conditions = ([f"max-width: {max_width}px"] if max_width else [])
+                if short:
+                    conditions.append("max-height: 680px")
+                bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(" and ".join(conditions)))
+                compact, narrow = max_width is not None, max_width == 740
+                bp.add_setter(self.split_view, "collapsed", compact)
+                bp.add_setter(self.split_view, "show-sidebar", not compact)
+                bp.add_setter(self.menu_toggle, "visible", compact)
+                for widget in (self.chart_row, self.overview_hero, self.overview_cards, self.disk_actions):
+                    bp.add_setter(widget, "orientation", Gtk.Orientation.VERTICAL if narrow else Gtk.Orientation.HORIZONTAL)
+                for decoration in self.page_decorations:
+                    bp.add_setter(decoration, "visible", not short)
+                for page in self.pages:
+                    bp.add_setter(page, "spacing", 10 if short else (12 if page.has_css_class("disk-page") else 18))
+                bp.add_setter(self.treemap, "content-height", 250 if short else 360)
+                bp.add_setter(self.disk_list_scroll, "min-content-height", 180 if short else 285)
+                bp.connect("apply", lambda _, c=compact, n=narrow, s=short: self.apply_layout_classes(c, n, s))
+                bp.connect("unapply", lambda _: self.apply_layout_classes(False, False, False))
+                self.add_breakpoint(bp)
+
+    def apply_layout_classes(self, compact, narrow, short):
+        for name, active in (("compact-sidebar", compact), ("narrow-layout", narrow), ("short-layout", short)):
+            (self.add_css_class if active else self.remove_css_class)(name)
+        self.narrow_layout = narrow
+        self.update_breadcrumbs()
 
     def on_close(self, *_):
         self.celebration.stop()
@@ -168,15 +219,19 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         content = box(spacing=18, css="page")
         drag_handle = Gtk.WindowHandle(child=label(number, "eyebrow"))
         content.append(drag_handle)
-        content.append(label(title, "page-title"))
-        content.append(label(subtitle, "muted", wrap=True))
+        content.append(label(title, "page-title", wrap=True))
+        subtitle_label = label(subtitle, "muted", wrap=True)
+        content.append(subtitle_label)
+        self.page_decorations.append(subtitle_label)
+        self.pages.append(content)
         companion = box(False, 8)
         avatar = Gtk.Image.new_from_file(str(ASSETS / "mio-icon.png"))
         avatar.set_pixel_size(27)
         companion.append(avatar)
         lines = {"overview": "澪 · 今天也一起照顾电脑吧。", "cache": "澪 · 确认清单后，我来帮你收纳。", "disk": "澪 · 方块越大，藏着的文件越多。", "apps": "澪 · 先确认软件来源，再决定去留。", "maintenance": "澪 · 系统操作的每一步，都交给你确认。"}
-        companion.append(label(lines.get(key, "澪 · 我在这里。"), "character-note"))
+        companion.append(label(lines.get(key, "澪 · 我在这里。"), "character-note", wrap=True))
         content.append(companion)
+        self.page_decorations.append(companion)
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroller.set_child(content)
         self.stack.add_named(scroller, key)
@@ -185,6 +240,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
     def navigate(self, key):
         if getattr(self, "disk_mutating", False):
             return
+        if self.split_view.get_collapsed():
+            self.split_view.set_show_sidebar(False)
         self.stack.set_visible_child_name(key)
         for name, nav in self.nav.items():
             (nav.add_css_class if name == key else nav.remove_css_class)("active")
@@ -194,6 +251,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
     def build_overview(self):
         page = self.page("overview", "01 / OVERVIEW", "给电脑，留一点呼吸空间。", "从真实数据开始，了解你的 Linux 桌面。")
         hero = box(False, 20, "hero")
+        self.overview_hero = hero
         copy = box(spacing=14)
         copy.set_hexpand(True)
         copy.append(label("让空间，回到你手里。", "hero-title", wrap=True))
@@ -213,6 +271,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         hero.append(art)
         page.append(hero)
         cards = box(False, 14)
+        self.overview_cards = cards
         self.metrics = {}
         for key, name in [("cpu", "CPU 使用率"), ("memory", "内存使用率"), ("disk", "主目录所在磁盘")]:
             card = box(spacing=10, css="card")
@@ -267,7 +326,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
 
     def build_cache(self):
         page = self.page("cache", "02 / CACHE", "先看清楚，再决定。", "查看缓存占用，审阅后移入系统回收站。文件较旧并不代表可以安全删除。")
-        controls = box(False)
+        controls = flow()
         self.cache_button = button("扫描缓存", lambda _: self.start_cache(), "suggested-action")
         self.cache_spinner = Gtk.Spinner()
         self.cache_controls = controls
@@ -351,7 +410,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         page = self.page("disk", "03 / ANALYZE", "大文件夹，一眼就看见。", "方块越大，占用越多。单击选中，双击文件夹进入；面包屑随时返回。")
         page.add_css_class("disk-page")
         page.set_spacing(12)
-        controls = box(False, 8)
+        controls = flow()
         self.parent_button = button("↑ 上一级", lambda _: self.open_disk_path(self.disk_path.parent))
         self.choose_button = button("选择文件夹", self.choose_folder)
         self.home_button = button("主目录", lambda _: self.open_disk_path(Path.home()))
@@ -386,22 +445,25 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         page.append(self.disk_summary)
         page.append(self.disk_note)
         actions = box(False, 10)
+        self.disk_actions = actions
         self.disk_delete = button("删除所选…", lambda _: self.review_disk_delete(), "suggested-action")
         self.disk_delete.set_tooltip_text("删除所选文件或文件夹：确认后移入系统回收站，可恢复")
         actions.append(self.disk_delete)
         self.disk_action_note = label("选中文件或文件夹，再确认移入系统回收站。", "small muted", wrap=True)
+        self.disk_action_note.set_hexpand(True)
         actions.append(self.disk_action_note)
         self.disk_mutating = False
         self.disk_selected = None
         page.append(actions)
         chart_row = box(False, 12)
+        self.chart_row = chart_row
         chart_frame = box(css="disk-map")
         chart_frame.set_hexpand(True)
         self.treemap = Treemap(self.select_disk_entry, self.open_disk_path)
         chart_frame.append(self.treemap)
         chart_row.append(chart_frame)
         list_column = box(spacing=8)
-        list_column.set_size_request(275, -1)
+        list_column.set_size_request(245, -1)
         list_column.append(label("按体积排序", "section-title"))
         self.disk_search = Gtk.SearchEntry(placeholder_text="筛选当前目录")
         self.disk_search.connect("search-changed", lambda _: self.render_disk_list())
@@ -411,6 +473,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.disk_results.set_activate_on_single_click(False)
         self.disk_results.connect("row-selected", self.select_disk_row)
         list_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=285)
+        self.disk_list_scroll = list_scroll
         list_scroll.set_vexpand(True)
         list_scroll.set_child(self.disk_results)
         list_column.append(list_scroll)
@@ -551,7 +614,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         for part in self.disk_path.relative_to(anchor).parts:
             current = current / part
             segments.append((part, current))
-        visible = segments if len(segments) <= 4 else [segments[0], None, *segments[-2:]]
+        limit = 3 if getattr(self, "narrow_layout", False) else 4
+        visible = segments if len(segments) <= limit else [segments[0], None, *segments[-(limit - 2):]]
         for index, segment in enumerate(visible):
             if index:
                 self.breadcrumbs.append(label("›", "muted"))
@@ -559,7 +623,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
                 menu = Gtk.MenuButton(label="…", tooltip_text="展开中间目录")
                 popover = Gtk.Popover()
                 choices = box(spacing=2)
-                for name, path in segments[1:-2]:
+                for name, path in segments[1:-(limit - 2)]:
                     item = button(name, lambda _, target=path: (popover.popdown(), self.open_disk_path(target)))
                     item.set_tooltip_text(str(path))
                     choices.append(item)

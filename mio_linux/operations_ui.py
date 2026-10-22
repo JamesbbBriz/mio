@@ -75,7 +75,7 @@ class OperationsUI:
         dialog = Adw.MessageDialog(transient_for=self, heading=title, body='请核对以下具体目标和影响。')
         view = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR)
         view.get_buffer().set_text(text)
-        scroll = Gtk.ScrolledWindow(min_content_height=220, min_content_width=520, max_content_height=400)
+        scroll = Gtk.ScrolledWindow(min_content_height=min(220, max(80, self.get_height() - 300)), min_content_width=min(520, max(280, self.get_width() - 80)), max_content_height=min(400, max(100, self.get_height() - 260)))
         scroll.set_child(view)
         from .app import box
         content = box(spacing=8)

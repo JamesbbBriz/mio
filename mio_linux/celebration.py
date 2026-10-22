@@ -65,6 +65,7 @@ class SlashCelebration(Gtk.DrawingArea):
         t = self.elapsed
         fade = min(1, max(0, (2.8 - t) / .45)) if self.animate else 1
         cx, cy = self.target if self.target else (width * .58, min(height * .56, height - 180))
+        cx, cy = max(60, min(width - 60, cx)), max(90, min(height - 100, cy))
         if self.animate:
             # Abstract cache fragments: a visual receipt, not a second file operation.
             burst = max(0, min(1, (t - .75) / .9))
@@ -116,7 +117,7 @@ class SlashCelebration(Gtk.DrawingArea):
                     cr.fill()
         if t > .75 or not self.animate:
             panel_w = min(470, width - 40)
-            x, y = (width - panel_w) / 2 + 50, min(cy + 155, height - 90)
+            x, y = (width - panel_w) / 2, min(cy + 155, height - 90)
             cr.set_source_rgba(.98, .95, 1, .97 * fade)
             radius = 16
             cr.new_sub_path()

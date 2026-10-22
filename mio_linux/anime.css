@@ -47,3 +47,15 @@ tooltip { background: #695578; color: #fff5ff; border-radius: 10px; }
 .nav-apps.active { border-color: #7eaa92; }
 .nav-trash.active { border-color: #cda16e; }
 .nav-maintenance.active { border-color: #7398c9; }
+
+/* Layout changes use native breakpoints, retaining full-size touch targets. */
+flowboxchild { padding: 0; }
+.compact-sidebar .eyebrow { padding-left: 40px; }
+.narrow-layout .page { padding: 18px 14px 24px; }
+.narrow-layout .page-title { font-size: 24px; }
+.narrow-layout .hero { padding: 18px; }
+.narrow-layout .hero-title { font-size: 25px; }
+.narrow-layout .card { padding: 16px; }
+
+.short-layout .page { padding-top: 16px; }
+.short-layout .page-title { font-size: 23px; }

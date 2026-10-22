@@ -33,6 +33,7 @@ jobs:
         run: |
           xvfb-run -a python3 -m tests.smoke_gui
           xvfb-run -a python3 -m tests.smoke_disk_delete
+          xvfb-run -a python3 -m tests.smoke_responsive
       - name: Upload GUI report and screenshots
         if: always()
         uses: actions/upload-artifact@v4
