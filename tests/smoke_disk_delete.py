@@ -44,8 +44,19 @@ def tick():
             w.disk_delete.emit('clicked')
             assert '部分扫描结果' in w.disk_action_note.get_label()
             assert not w.operation_busy
+            tile = w.treemap.tiles[0]
+            # The context entry must use the same partial-scan refusal as the
+            # toolbar, even though it has its own selection/hit-test path.
+            w.treemap.mio_context_gesture.emit('pressed', 1, tile.x + tile.width / 2, tile.y + tile.height / 2)
+            w.context_popover.get_child().emit('clicked')
+            assert '部分扫描结果' in w.disk_action_note.get_label()
+            assert not w.operation_busy and folder.exists()
             w.current_disk_scan.partial = False
-            w.disk_delete.emit('clicked')
+            w.treemap.mio_context_gesture.emit('pressed', 1, tile.x + tile.width / 2, tile.y + tile.height / 2)
+            assert w.disk_selected is tile.entry
+            assert w.context_popover.get_child().get_label() == '移入系统回收站…'
+            assert folder.exists() and not w.operation_busy
+            w.context_popover.get_child().emit('clicked')
             phase = 2
         elif phase == 2 and not w.operation_busy:
             w.last_review_dialog.response('cancel')
@@ -53,7 +64,13 @@ def tick():
             assert w.celebration.play_count == 0
             mock = patch('mio_linux.disk_operations.trash_disk', side_effect=ValueError('fixture refusal'))
             mock.start()
-            w.disk_delete.emit('clicked')
+            row = w.disk_results.get_first_child()
+            bounds_ok, bounds = row.compute_bounds(w.disk_results)
+            assert bounds_ok
+            w.disk_results.mio_context_gesture.emit('pressed', 1, 20., bounds.get_y() + row.get_height() / 2)
+            assert w.context_popover is not None
+            assert w.disk_selected is row.mio_entry
+            w.context_popover.get_child().emit('clicked')
             phase = 3
         elif phase == 3 and not w.operation_busy:
             w.last_review_dialog.response('execute')
@@ -109,4 +126,4 @@ GLib.timeout_add(150, tick)
 app.run(['mio-disk-delete-test'])
 temp.cleanup()
 assert ok
-print('Disk GUI: selection, confirmation cancel, refusal, target slash and rescan passed')
+print('Disk GUI: map/list context menus, partial refusal, confirmation cancel, failure, target slash and rescan passed')

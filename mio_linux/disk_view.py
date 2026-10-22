@@ -39,7 +39,7 @@ class Treemap(Gtk.DrawingArea):
         motion = Gtk.EventControllerMotion()
         motion.connect("motion", self.motion)
         self.add_controller(motion)
-        click = Gtk.GestureClick()
+        click = Gtk.GestureClick(button=1)
         click.connect("released", self.clicked)
         self.add_controller(click)
         keys = Gtk.EventControllerKey()

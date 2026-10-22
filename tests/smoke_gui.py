@@ -144,7 +144,9 @@ def tick():
             window.disk_search.set_text("图片")
             window.render_disk_list()
             assert window.disk_results.get_first_child().get_next_sibling() is None
-            window.disk_results.get_first_child().emit("activate")
+            # Mouse double-click and keyboard activation emit the ListBox
+            # signal; Row.activate alone does not exercise pointer activation.
+            window.disk_results.emit("row-activated", window.disk_results.get_first_child())
             assert window.disk_path == disk_root / "图片"
             phase = 4
         elif phase == 4:
@@ -162,8 +164,15 @@ def tick():
             window.navigate('cache')
             window.recovery = Recovery(root / 'mio-recovery')
             os.utime(root / 'cache/example.bin', (1, 1))
-            window.cache_choices[0][0].set_active(True)
-            window.review_cache()
+            assert window.cache_review.get_label() == '清理所选缓存…'
+            row = window.cache_results.get_first_child()
+            bounds_ok, bounds = row.compute_bounds(window.cache_results)
+            assert bounds_ok
+            window.cache_results.mio_context_gesture.emit('pressed', 1, 20., bounds.get_y() + row.get_height() / 2)
+            assert window.context_popover is not None
+            assert window.context_popover.get_child().get_label() == '清理此项缓存…'
+            assert (root / 'cache/example.bin').exists(), 'Right-click must only open a menu'
+            window.context_popover.get_child().emit('clicked')
             phase = 6
         elif phase == 6 and not window.operation_busy:
             assert window.last_review_dialog.get_heading() == '移入系统回收站？'
@@ -213,7 +222,7 @@ def tick():
             assert '未操作文件' in window.celebration.caption
             window.celebration.stop()
             window.celebration.enabled = True
-            result.update(slash_success_only=True, cleanup_confirm=True, system_trash_shortcut=True, package_dispatch=True, maintenance_cancel=True)
+            result.update(slash_success_only=True, cleanup_confirm=True, cache_context_menu=True, list_double_click=True, system_trash_shortcut=True, package_dispatch=True, maintenance_cancel=True)
             window.navigate('overview')
             phase = 9
         elif phase == 9:

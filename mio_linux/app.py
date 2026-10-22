@@ -242,6 +242,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.update_breadcrumbs()
 
     def on_close(self, *_):
+        self.dismiss_context_menu()
         self.celebration.stop()
         self.cancel.set()
         self.operation_cancel.set()
@@ -375,6 +376,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         page.append(self.cache_note)
         page.append(label("目录 · 总体积 / 超过 7 天未修改", "section-title"))
         self.cache_results = self.results_list()
+        self.bind_context_menu(self.cache_results, self.cache_context_menu)
         page.append(self.cache_results)
         page.append(label("勾选目录后审阅超过 7 天的普通文件；请先关闭相关应用。移入系统回收站后可恢复，永久删除才释放空间。", "small muted", wrap=True))
 
@@ -416,6 +418,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         return f"{state} · 检查 {scan.visited:,} 项 · 跳过 {scan.skipped:,} 项（链接、跨磁盘或不可读等）"
 
     def start_cache(self, root=None):
+        self.dismiss_context_menu()
         self.navigate("cache")
         self.cache_note.set_label("正在扫描…")
         self.run_job("cache", lambda: scan_directory(root or cache_root(), cancel=self.cancel), self.show_cache, self.cache_button, self.cache_spinner)
@@ -431,6 +434,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             row.add_prefix(Gtk.Image(icon_name="folder-symbolic" if entry.is_dir else "text-x-generic-symbolic"))
             row.add_suffix(label(human_size(entry.size)))
             row.set_tooltip_text(str(entry.path))
+            row.mio_entry = entry
             check = Gtk.CheckButton()
             row.add_prefix(check)
             self.cache_choices.append((check, entry.path))
@@ -494,6 +498,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         chart_frame = box(css="disk-map")
         chart_frame.set_hexpand(True)
         self.treemap = Treemap(self.select_disk_entry, self.open_disk_path)
+        self.bind_context_menu(self.treemap, self.disk_map_context_menu)
         chart_frame.append(self.treemap)
         chart_row.append(chart_frame)
         list_column = box(spacing=8)
@@ -506,6 +511,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.disk_results.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.disk_results.set_activate_on_single_click(False)
         self.disk_results.connect("row-selected", self.select_disk_row)
+        self.disk_results.connect("row-activated", self.activate_disk_row)
+        self.bind_context_menu(self.disk_results, self.disk_list_context_menu)
         list_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=285)
         self.disk_list_scroll = list_scroll
         list_scroll.set_vexpand(True)
@@ -539,6 +546,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
     def start_disk(self, root):
         if "disk" in self.jobs or self.disk_mutating:
             return
+        self.dismiss_context_menu()
         self.disk_selected = None
         self.disk_delete.set_sensitive(False)
         target = Path(root)
@@ -695,6 +703,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.disk_selection_path.set_label(str(entry.path))
 
     def show_disk(self, scan):
+        self.dismiss_context_menu()
         self.disk_selected = None
         self.disk_delete.set_sensitive(True)
         self.disk_path = scan.root
@@ -712,6 +721,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
     def render_disk_list(self):
         if not hasattr(self, "current_disk_scan"):
             return
+        self.dismiss_context_menu()
         clear(self.disk_results)
         scan = self.current_disk_scan
         query = self.disk_search.get_text().casefold()
@@ -730,7 +740,6 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             row.set_tooltip_text(f"{entry.path}\n{'目录' if entry.is_dir else '文件'} · {entry.files:,} 个文件{' · 未完整扫描' if not entry.complete else ''}")
             row.mio_entry = entry
             # Native row activation provides the keyboard alternative to the map.
-            row.connect("activate", lambda _, item=entry: self.activate_disk_entry(item))
             self.disk_results.append(row)
         if not entries:
             self.disk_results.append(label("没有匹配的项目", "muted"))
@@ -744,9 +753,16 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             self.treemap.select(entry)
 
     def activate_disk_entry(self, entry):
+        if self.disk_mutating or "disk" in self.jobs:
+            return
         self.treemap.select(entry)
         if entry.is_dir:
             self.open_disk_path(entry.path)
+
+    def activate_disk_row(self, listbox, row):
+        entry = getattr(row, "mio_entry", None)
+        if entry is not None:
+            self.activate_disk_entry(entry)
 
     def more_disk_entries(self, *_):
         self.disk_visible_limit += 100

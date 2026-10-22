@@ -57,6 +57,22 @@ class DiskOperationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 plan_disk(path)
 
+    def test_refusal_names_the_actual_link_or_special_file(self):
+        cases = [('theme-link', '符号链接', lambda p: p.symlink_to(self.root)),
+                 ('shared-file', '硬链接', lambda p: os.link(self.folder / 'file', p)),
+                 ('named-pipe', '特殊文件', lambda p: os.mkfifo(p))]
+        for name, kind, create in cases:
+            with self.subTest(kind=kind):
+                item = self.folder / name
+                create(item)
+                try:
+                    with self.assertRaises(ValueError) as caught:
+                        plan_disk(self.folder)
+                    self.assertIn(kind, str(caught.exception))
+                    self.assertIn(str(item if kind != '硬链接' else self.folder), str(caught.exception))
+                finally:
+                    item.unlink()
+
     def test_cancel_and_sink_failure_preserve_target(self):
         plan = plan_disk(self.folder)
         cancel = threading.Event()

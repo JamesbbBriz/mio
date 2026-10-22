@@ -3,7 +3,7 @@ from pathlib import Path
 import json
 import shlex
 import threading
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 from . import packages
 from .backend import human_size
 from .recovery import plan_cache
@@ -19,7 +19,8 @@ class OperationsUI:
         self.package_items = []
         self.transaction = None
         self.recovery = SystemTrash()
-        self.cache_review = button('审阅所选缓存文件', lambda _: self.review_cache())
+        self.cache_review = button('清理所选缓存…', lambda _: self.review_cache())
+        self.cache_review.set_tooltip_text('先审阅具体文件，确认后移入系统回收站')
         self.cache_controls.append(self.cache_review)
         self.cache_controls.append(button('停止操作', lambda _: self.operation_cancel.set()))
         self.cache_controls.append(button('打开系统回收站 ↗', lambda _: self.open_system_trash()))
@@ -93,11 +94,91 @@ class OperationsUI:
         self.last_review_dialog = dialog
         dialog.present()
 
-    def review_cache(self):
+    def bind_context_menu(self, widget, callback):
+        gesture = Gtk.GestureClick(button=3)
+        gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        gesture.connect('pressed', lambda controller, presses, x, y: callback(widget, x, y))
+        widget.add_controller(gesture)
+        widget.mio_context_gesture = gesture
+        widget.connect('unrealize', lambda _: self.dismiss_context_menu())
+
+    def dismiss_context_menu(self):
+        popover = getattr(self, 'context_popover', None)
+        self.context_popover = None
+        if popover is not None:
+            popover.popdown()
+            if popover.get_parent() is not None:
+                popover.unparent()
+
+    def context_action(self, anchor, x, y, title, callback):
+        self.dismiss_context_menu()
+        popover = Gtk.Popover()
+        popover.set_parent(anchor)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        action = Gtk.Button(label=title, css_classes=['flat'])
+        def activate(_):
+            self.dismiss_context_menu()
+            callback()
+        action.connect('clicked', activate)
+        popover.set_child(action)
+        def closed(widget):
+            if self.context_popover is widget:
+                self.context_popover = None
+            if widget.get_parent() is not None:
+                widget.unparent()
+        popover.connect('closed', closed)
+        self.context_popover = popover
+        popover.popup()
+
+    def disk_map_context_menu(self, widget, x, y):
+        tile = self.treemap.tile_at(x, y)
+        self.disk_context_menu(widget, x, y, tile.entry if tile else None)
+
+    def disk_list_context_menu(self, widget, x, y):
+        row = self.disk_results.get_row_at_y(int(y))
+        self.disk_context_menu(widget, x, y, getattr(row, 'mio_entry', None))
+
+    def disk_context_menu(self, widget, x, y, entry):
+        self.dismiss_context_menu()
+        scan = getattr(self, 'current_disk_scan', None)
+        if (entry is None or scan is None or self.operation_busy or self.disk_mutating
+                or 'disk' in self.jobs or not any(entry is item for item in scan.entries)):
+            return
+        self.treemap.select(entry)
+        def review():
+            if scan is not self.current_disk_scan:
+                return
+            self.treemap.select(entry)
+            self.review_disk_delete()
+        self.context_action(widget, x, y, '移入系统回收站…', review)
+
+    def cache_context_menu(self, widget, x, y):
+        self.dismiss_context_menu()
+        row = self.cache_results.get_row_at_y(int(y))
+        entry = getattr(row, 'mio_entry', None)
+        if entry is None or self.operation_busy or 'cache' in self.jobs:
+            return
+        scan = self.cache_scan
+        def review():
+            if scan is not self.cache_scan:
+                return
+            self.review_cache([entry.path])
+        self.context_action(widget, x, y, '清理此项缓存…', review)
+
+    def review_cache(self, selected=None):
+        if self.operation_busy or 'cache' in self.jobs:
+            return
         if not hasattr(self, 'cache_scan'):
             self.cache_note.set_label('请先扫描缓存并勾选目录')
             return
-        selected = [path for check, path in self.cache_choices if check.get_active()]
+        if selected is None:
+            selected = [path for check, path in self.cache_choices if check.get_active()]
+        else:
+            # Context actions bind exactly the clicked group, never an old set
+            # of checkboxes or a row from a replaced scan.
+            selected = [path for path in selected if any(path == item.path for item in self.cache_scan.entries)]
         if not selected:
             self.cache_note.set_label('请先勾选要清理的缓存目录')
             return

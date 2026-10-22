@@ -42,7 +42,14 @@ def plan_disk(path, cancel=None, max_nodes=20000, max_seconds=30):
             raise ValueError('目标包含其他文件系统或其他用户的文件，未移动')
         is_dir = stat.S_ISDIR(s.st_mode)
         if not is_dir and (not stat.S_ISREG(s.st_mode) or s.st_nlink != 1):
-            raise ValueError('目标包含链接或特殊文件，未移动；请在文件管理器中处理')
+            refused = path if relative == '.' else path / relative
+            if stat.S_ISLNK(s.st_mode):
+                kind = '符号链接（指向其他位置的链接文件）'
+            elif stat.S_ISREG(s.st_mode):
+                kind = '硬链接（与其他文件名共享数据）'
+            else:
+                kind = '特殊文件（如管道或套接字）'
+            raise ValueError(f'包含{kind}：{refused}。当前不支持整项移动；可进入目录另选普通文件。')
         if not idle(path if relative == '.' else path / relative):
             raise ValueError('目标正在使用或无法确认空闲；请关闭相关应用')
         check()
