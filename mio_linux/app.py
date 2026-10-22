@@ -407,6 +407,9 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         self.disk_search.connect("search-changed", lambda _: self.render_disk_list())
         list_column.append(self.disk_search)
         self.disk_results = self.results_list()
+        self.disk_results.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.disk_results.set_activate_on_single_click(False)
+        self.disk_results.connect("row-selected", self.select_disk_row)
         list_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=285)
         list_scroll.set_vexpand(True)
         list_scroll.set_child(self.disk_results)
@@ -581,6 +584,12 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             return
         self.disk_selected = entry if any(entry is e for e in self.current_disk_scan.entries) else None
         self.disk_delete.set_sensitive(True)
+        row = self.disk_results.get_first_child()
+        while row is not None:
+            if getattr(row, "mio_entry", None) is self.disk_selected and self.disk_results.get_selected_row() is not row:
+                self.disk_results.select_row(row)
+                break
+            row = row.get_next_sibling()
         total = self.current_disk_scan.size
         percent = f"{entry.size / total:.1%}" if total else "0%"
         incomplete = " · 未完整扫描" if not entry.complete else ""
@@ -621,8 +630,7 @@ class Window(OperationsUI, Adw.ApplicationWindow):
             content.append(label(human_size(entry.size), "small muted"))
             row.set_child(content)
             row.set_tooltip_text(f"{entry.path}\n{'目录' if entry.is_dir else '文件'} · {entry.files:,} 个文件{' · 未完整扫描' if not entry.complete else ''}")
-            select = button("选择", lambda _, item=entry: self.treemap.select(item))
-            content.append(select)
+            row.mio_entry = entry
             # Native row activation provides the keyboard alternative to the map.
             row.connect("activate", lambda _, item=entry: self.activate_disk_entry(item))
             self.disk_results.append(row)
@@ -631,6 +639,11 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         elif len(entries) > self.disk_visible_limit:
             more = button(f"再显示 100 项（共 {len(entries):,}）", self.more_disk_entries)
             self.disk_results.append(more)
+
+    def select_disk_row(self, listbox, row):
+        entry = getattr(row, "mio_entry", None)
+        if entry is not None:
+            self.treemap.select(entry)
 
     def activate_disk_entry(self, entry):
         self.treemap.select(entry)

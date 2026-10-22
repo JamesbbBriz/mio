@@ -131,10 +131,10 @@ class OperationsUI:
         entry = self.disk_selected
         scan = getattr(self, 'current_disk_scan', None)
         if scan is None:
-            self.disk_action_note.set_label('请先点击“扫描此目录”，再单击一个方块或列表中的“选择”')
+            self.disk_action_note.set_label('请先点击“扫描此目录”，再单击一个方块或列表项')
             return
         if entry is None or not any(entry is e for e in scan.entries):
-            self.disk_action_note.set_label('请先单击要删除的方块，或点击右侧列表中的“选择”')
+            self.disk_action_note.set_label('请先单击要删除的方块或右侧列表项')
             return
         if scan.partial or not entry.complete:
             self.disk_action_note.set_label('当前是部分扫描结果，不能删除。请进入较小目录，点击“扫描此目录”完成扫描后再选择。')

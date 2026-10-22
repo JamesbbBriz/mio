@@ -102,6 +102,16 @@ def tick():
             assert all(200 <= nav.get_width() <= 300 for nav in window.nav.values()), [nav.get_width() for nav in window.nav.values()]
             assert len(window.treemap.tiles) == 6
             screenshot(window, "disk-treemap.png")
+            assert not window.disk_results.get_activate_on_single_click()
+            first = window.disk_results.get_row_at_index(0)
+            window.disk_results.select_row(first)
+            assert window.disk_selected is first.mio_entry
+            assert window.disk_path == disk_root
+            assert window.disk_delete.get_sensitive()
+            child = first.get_child().get_first_child()
+            while child is not None:
+                assert not isinstance(child, Gtk.Button)
+                child = child.get_next_sibling()
             scan_generation = window.disk_generation
             tile = next(tile for tile in window.treemap.tiles if tile.entry.path.name == "视频")
             # Drive the actual native map gesture handler, including hit testing.
