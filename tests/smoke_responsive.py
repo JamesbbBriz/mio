@@ -31,6 +31,26 @@ def capture(w, name):
     texture.save_to_png(str(output / name))
 
 
+def hit(widget, window):
+    valid, bounds = widget.compute_bounds(window)
+    assert valid
+    picked = window.pick(bounds.get_x() + bounds.get_width() / 2,
+                         bounds.get_y() + bounds.get_height() / 2, Gtk.PickFlags.DEFAULT)
+    assert picked is not None
+    assert picked is widget or picked.is_ancestor(widget), ('blocked hit target', type(widget).__name__, type(picked).__name__)
+
+
+def advance(w):
+    global index, phase, ready_at
+    index += 1
+    if index == len(cases):
+        w.confirm_operation('移入系统回收站？', str(root / ('long-name-' * 20)) + '\n确认后可恢复。', lambda: None)
+        ready_at = time.monotonic() + .5
+        phase = 3
+    else:
+        phase = 1
+
+
 def tick():
     global phase, index, ready_at, ok
     w = app.window
@@ -55,6 +75,12 @@ def tick():
             assert all(d.get_visible() == (height > 680) for d in w.page_decorations)
             assert w.split_view.get_collapsed() == (width <= 1000)
             assert (w.chart_row.get_orientation() == Gtk.Orientation.VERTICAL) == (width <= 740)
+            assert isinstance(w.window_handle, Gtk.WindowHandle)
+            valid, title_bounds = w.window_title.compute_bounds(w)
+            picked = w.pick(title_bounds.get_x() + title_bounds.get_width() / 2,
+                            title_bounds.get_y() + title_bounds.get_height() / 2, Gtk.PickFlags.DEFAULT)
+            assert picked is w.window_handle or picked.is_ancestor(w.window_handle), 'titlebar drag region obstructed'
+            assert w.window_handle.get_height() >= 34
             scroller = w.stack.get_visible_child()
             adj = scroller.get_hadjustment()
             assert adj.get_upper() <= adj.get_page_size() + 2, (page, width, 'horizontal overflow')
@@ -71,18 +97,20 @@ def tick():
             inspect(scroller.get_child())
             if page == 'disk':
                 capture(w, f'responsive-{width}x{height}.png')
-                if width == 420:
+                if width <= 1000:
+                    hit(w.menu_toggle, w)
                     w.menu_toggle.emit('clicked')
                     assert w.split_view.get_show_sidebar()
-                    w.navigate('cache')
-                    assert not w.split_view.get_show_sidebar()
-            index += 1
-            if index == len(cases):
-                w.confirm_operation('移入系统回收站？', str(root / ('long-name-' * 20)) + '\n确认后可恢复。', lambda: None)
-                ready_at = time.monotonic() + .5
-                phase = 3
-            else:
-                phase = 1
+                    ready_at = time.monotonic() + .4
+                    phase = 4
+                    return True
+            advance(w)
+        elif phase == 4 and time.monotonic() >= ready_at:
+            hit(w.nav['cache'], w)
+            w.nav['cache'].emit('clicked')
+            assert w.stack.get_visible_child_name() == 'cache'
+            assert not w.split_view.get_show_sidebar()
+            advance(w)
         elif phase == 3 and time.monotonic() >= ready_at:
             dialog = w.last_review_dialog
             assert 0 < dialog.get_width() <= w.get_width(), ('dialog width', dialog.get_width())

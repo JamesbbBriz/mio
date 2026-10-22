@@ -50,7 +50,6 @@ tooltip { background: #695578; color: #fff5ff; border-radius: 10px; }
 
 /* Layout changes use native breakpoints, retaining full-size touch targets. */
 flowboxchild { padding: 0; }
-.compact-sidebar .eyebrow { padding-left: 40px; }
 .narrow-layout .page { padding: 18px 14px 24px; }
 .narrow-layout .page-title { font-size: 24px; }
 .narrow-layout .hero { padding: 18px; }
@@ -59,3 +58,6 @@ flowboxchild { padding: 0; }
 
 .short-layout .page { padding-top: 16px; }
 .short-layout .page-title { font-size: 23px; }
+
+.window-toolbar { padding: 4px 8px; min-height: 34px; background: linear-gradient(100deg, #fbeafa, #e9eeff); border-bottom: 1px solid #e2cfea; }
+.window-title { color: #71558e; font-size: 13px; font-weight: 700; padding-left: 6px; }

@@ -154,16 +154,27 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         split.set_sidebar(sidebar_scroll)
         split.set_content(self.stack)
         outer.set_child(split)
-        controls = Gtk.WindowControls(side=Gtk.PackType.END, halign=Gtk.Align.END, valign=Gtk.Align.START, margin_top=6, margin_end=8)
         self.celebration = SlashCelebration()
         outer.add_overlay(self.celebration)
-        outer.add_overlay(controls)
-        self.menu_toggle = Gtk.Button(icon_name="sidebar-show-symbolic", tooltip_text="显示功能导航",
-                                      halign=Gtk.Align.START, valign=Gtk.Align.START, margin_top=6, margin_start=8,
-                                      visible=False)
+        # Reserve a real titlebar row: overlays must not cover navigation or
+        # leave dragging dependent on small labels inside a scrolling page.
+        header = box(False, 8, "window-toolbar")
+        self.menu_toggle = Gtk.Button(icon_name="sidebar-show-symbolic", tooltip_text="显示／收起功能导航",
+                                      valign=Gtk.Align.CENTER, visible=False)
         self.menu_toggle.connect("clicked", lambda _: split.set_show_sidebar(not split.get_show_sidebar()))
-        outer.add_overlay(self.menu_toggle)
-        self.set_content(outer)
+        header.append(self.menu_toggle)
+        self.window_title = label("Mio · 澪", "window-title")
+        self.window_title.set_hexpand(True)
+        self.window_title.set_ellipsize(Pango.EllipsizeMode.END)
+        self.window_title.set_can_target(False)
+        header.append(self.window_title)
+        header.append(Gtk.WindowControls(side=Gtk.PackType.END, valign=Gtk.Align.CENTER))
+        self.window_handle = Gtk.WindowHandle(child=header)
+        shell = box(spacing=0)
+        shell.append(self.window_handle)
+        outer.set_vexpand(True)
+        shell.append(outer)
+        self.set_content(shell)
         self.build_overview()
         self.build_cache()
         self.build_disk()
@@ -243,6 +254,8 @@ class Window(OperationsUI, Adw.ApplicationWindow):
         if self.split_view.get_collapsed():
             self.split_view.set_show_sidebar(False)
         self.stack.set_visible_child_name(key)
+        titles = {"overview": "系统概览", "cache": "缓存清理", "disk": "磁盘分析", "apps": "应用管理", "maintenance": "系统维护"}
+        self.window_title.set_label("Mio · " + titles[key])
         for name, nav in self.nav.items():
             (nav.add_css_class if name == key else nav.remove_css_class)("active")
         if key == "apps" and key not in self.completed:
